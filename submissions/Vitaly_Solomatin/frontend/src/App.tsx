@@ -1,10 +1,9 @@
 import { useEffect } from 'react'
-import { ConnectionPanel } from './components/ConnectionPanel.tsx'
 import { DataView } from './components/DataView.tsx'
+import { StatusPanel } from './components/StatusPanel.tsx'
 import { useConnection } from './state/connection.ts'
 
 export default function App() {
-  const connection = useConnection((s) => s.connection)
   const check = useConnection((s) => s.check)
 
   useEffect(() => {
@@ -17,9 +16,7 @@ export default function App() {
         <h1>OREE DAM Monitor</h1>
       </header>
       <main>
-        <section className="card">
-          <ConnectionPanel connection={connection} />
-        </section>
+        <StatusPanel />
         <DataView />
       </main>
     </>

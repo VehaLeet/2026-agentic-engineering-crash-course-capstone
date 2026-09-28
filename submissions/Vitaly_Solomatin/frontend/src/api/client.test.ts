@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiContractError, ApiUnavailable, getHealth, getStatus } from './client.ts'
+import { ApiContractError, ApiUnavailable, getHealth, getRun, getStatus, startCollect } from './client.ts'
 
 // Реальний приклад відповіді /status (контракт http-api).
 const STATUS = {
@@ -69,5 +69,26 @@ describe('getHealth', () => {
   it('rejects an unexpected body', async () => {
     respond(200, { status: 'nope' })
     await expect(getHealth()).rejects.toBeInstanceOf(ApiContractError)
+  })
+})
+
+describe('collect', () => {
+  it('startCollect POSTs /api/collect and parses 202', async () => {
+    const f = respond(202, { run_id: 5, status_url: '/runs/5' })
+    await expect(startCollect()).resolves.toEqual({ run_id: 5, status_url: '/runs/5' })
+    expect(f.mock.calls[0][0]).toBe('/api/collect')
+    expect((f.mock.calls[0][1] as RequestInit).method).toBe('POST')
+  })
+
+  it('startCollect without integer run_id -> ApiContractError', async () => {
+    respond(202, { run_id: 'x' })
+    await expect(startCollect()).rejects.toBeInstanceOf(ApiContractError)
+  })
+
+  it('getRun reads /api/runs/{id}', async () => {
+    const run = { ...STATUS.last_run, id: 5, status: null, finished_at: null }
+    const f = respond(200, run)
+    await expect(getRun(5)).resolves.toEqual(run)
+    expect(f.mock.calls[0][0]).toBe('/api/runs/5')
   })
 })

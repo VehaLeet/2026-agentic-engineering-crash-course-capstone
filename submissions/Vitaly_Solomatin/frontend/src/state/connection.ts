@@ -1,9 +1,16 @@
 import { create } from 'zustand'
 import { ApiContractError, ApiUnavailable, getHealth, getStatus } from '../api/client.ts'
+import type { Run, RunStatus } from '../api/types.ts'
 
 export type Connection =
   | { state: 'loading' }
-  | { state: 'ok'; lastCheck: string | null; lastUpdate: string | null }
+  | {
+      state: 'ok'
+      lastCheck: string | null
+      lastUpdate: string | null
+      lastRunStatus: RunStatus | null // null — останній запуск без фінального статусу (або запусків не було)
+      recentErrors: Run[]
+    }
   | { state: 'unavailable' }
   | { state: 'error'; message: string }
 
@@ -30,6 +37,8 @@ export const useConnection = create<ConnectionStore>((set) => ({
           state: 'ok',
           lastCheck: status.last_run?.started_at ?? null,
           lastUpdate: status.last_update?.started_at ?? null,
+          lastRunStatus: status.last_run?.status ?? null,
+          recentErrors: status.recent_errors,
         },
       })
     } catch (e) {

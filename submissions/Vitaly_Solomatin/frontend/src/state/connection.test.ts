@@ -39,12 +39,20 @@ it('ok with last check and last update times', async () => {
     recent_errors: [],
   })
   await useConnection.getState().check()
-  expect(state()).toEqual({ state: 'ok', lastCheck: '2026-09-28T11:52:38Z', lastUpdate: '2026-09-28T09:00:00Z' })
+  expect(state()).toEqual({ state: 'ok', lastCheck: '2026-09-28T11:52:38Z', lastUpdate: '2026-09-28T09:00:00Z', lastRunStatus: null, recentErrors: [] })
 })
 
 it('ok with nulls on an empty run log', async () => {
   getHealth.mockResolvedValue({ status: 'ok' })
   getStatus.mockResolvedValue({ last_run: null, last_update: null, recent_errors: [] })
   await useConnection.getState().check()
-  expect(state()).toEqual({ state: 'ok', lastCheck: null, lastUpdate: null })
+  expect(state()).toEqual({ state: 'ok', lastCheck: null, lastUpdate: null, lastRunStatus: null, recentErrors: [] })
+})
+
+it('ok carries last run status and recent errors', async () => {
+  const err = { id: 7, started_at: '2026-09-28T10:00:00Z', finished_at: '2026-09-28T10:00:01Z', status: 'error' as const, trigger: 'manual' as const, changed_days: [], error_message: 'FetchError: x' }
+  getHealth.mockResolvedValue({ status: 'ok' })
+  getStatus.mockResolvedValue({ last_run: { ...err, id: 8, status: 'no_changes' }, last_update: null, recent_errors: [err] })
+  await useConnection.getState().check()
+  expect(state()).toMatchObject({ state: 'ok', lastRunStatus: 'no_changes', recentErrors: [err] })
 })
