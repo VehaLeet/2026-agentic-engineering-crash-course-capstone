@@ -1,15 +1,33 @@
 """Only SQL boundary for DAM storage operations."""
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.dam_source.hashing import day_hashes as compute_day_hashes
 from app.dam_source.models import DamRecord, QuarterFetch
 from app.storage.models import DamDay, DamPrice, DamRawSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class DailyPrices:
+    """Подобовий агрегат. Не DamDay — це ім'я зайняте моделлю таблиці хешів діб."""
+
+    delivery_date: date
+    price_min: Decimal
+    price_max: Decimal
+    price_avg: Decimal  # проста середня за періодами (індекс BASE)
+    price_weighted: Decimal | None  # зважена за обсягом продажу (= «середньозважена» ОРЕЕ); None, якщо обсяг 0
+    volume_sell: Decimal
+    volume_buy: Decimal
+    declared_volume_sell: Decimal
+    declared_volume_buy: Decimal
+    periods: int
 
 
 class DamRepository:
@@ -106,3 +124,24 @@ class DamRepository:
                 .order_by(DamDay.delivery_date)
             )
             return dict(result.all())
+
+    async def get_daily(self, date_from: date, date_to: date) -> list[DailyPrices]:
+        if date_from > date_to:
+            raise ValueError("date_from must not be after date_to")
+        p = DamPrice
+        statement = (
+            select(
+                p.delivery_date,
+                func.min(p.price), func.max(p.price),
+                func.round(func.avg(p.price), 2),
+                func.round(func.sum(p.price * p.volume_sell) / func.nullif(func.sum(p.volume_sell), 0), 2),
+                func.sum(p.volume_sell), func.sum(p.volume_buy),
+                func.sum(p.declared_volume_sell), func.sum(p.declared_volume_buy),
+                func.count(),
+            )
+            .where(p.delivery_date.between(date_from, date_to))
+            .group_by(p.delivery_date)
+            .order_by(p.delivery_date)
+        )
+        async with self.sessions() as session:
+            return [DailyPrices(*row) for row in await session.execute(statement)]

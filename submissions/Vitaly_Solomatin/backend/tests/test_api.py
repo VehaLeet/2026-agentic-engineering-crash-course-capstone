@@ -161,7 +161,7 @@ async def test_every_route_except_health_requires_auth(engine):
         public = {r.path for r in app.routes if isinstance(r, APIRoute)}
         protected = [r for r in app.state.protected_router.routes if isinstance(r, APIRoute)]
         assert public == {"/health"}
-        assert {r.path for r in protected} == {"/collect", "/runs/{run_id}", "/status"}
+        assert {r.path for r in protected} == {"/collect", "/runs/{run_id}", "/status", "/prices"}
         for route in protected:
             path = route.path.replace("{run_id}", "1")
             for method in route.methods:

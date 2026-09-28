@@ -4,9 +4,9 @@ import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -44,6 +44,18 @@ class SystemStatus(BaseModel):
     last_run: Run | None
     last_update: Run | None
     recent_errors: list[Run]
+
+
+HOURLY_RANGE_LIMIT_DAYS = 366  # рівно рік з високосним: ≤ 9 150 точок, ≈ 0.5 МБ
+
+HOURLY_FIELDS = ("price", "volume_sell", "volume_buy", "declared_volume_sell", "declared_volume_buy")
+DAILY_FIELDS = ("price_min", "price_max", "price_avg", "price_weighted",
+                "volume_sell", "volume_buy", "declared_volume_sell", "declared_volume_buy", "periods")
+
+
+def _column(values) -> list:
+    # Decimal -> JSON-число лише на межі серіалізації; None лишається null.
+    return [float(v) if v is not None and not isinstance(v, int) else v for v in values]
 
 
 _basic = HTTPBasic(auto_error=False)
@@ -91,6 +103,7 @@ def create_app(
             return await collect_once(dam_source, repository, runs, db, kyiv_today(now()), "manual", run_id)
 
         app.state.runs = runs
+        app.state.repository = repository
         app.state.manager = RunManager(job)
         try:
             yield
@@ -131,6 +144,36 @@ def create_app(
             last_update=state.last_update and Run.of(state.last_update),
             recent_errors=[Run.of(r) for r in state.recent_errors],
         )
+
+    @api.get("/prices")
+    async def get_prices(
+        request: Request,
+        date_from: Annotated[date, Query()],
+        date_to: Annotated[date, Query()],
+        resolution: Annotated[Literal["hour", "day"], Query()] = "hour",
+    ) -> dict:
+        # Валідація до звернення до БД.
+        if date_from > date_to:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "date_from must not be after date_to")
+        body: dict = {"resolution": resolution, "date_from": date_from, "date_to": date_to}
+        repository: DamRepository = request.app.state.repository
+        if resolution == "hour":
+            if (date_to - date_from).days + 1 > HOURLY_RANGE_LIMIT_DAYS:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    f"hourly range is limited to {HOURLY_RANGE_LIMIT_DAYS} days; use resolution=day",
+                )
+            rows = await repository.get_records(date_from, date_to)
+            body["delivery_date"] = [r.delivery_date for r in rows]
+            body["period"] = [r.period for r in rows]
+            for field in HOURLY_FIELDS:
+                body[field] = _column(getattr(r, field) for r in rows)
+        else:
+            days = await repository.get_daily(date_from, date_to)
+            body["delivery_date"] = [d.delivery_date for d in days]
+            for field in DAILY_FIELDS:
+                body[field] = _column(getattr(d, field) for d in days)
+        return body
 
     app.include_router(api)
     app.state.protected_router = api  # для перевірки, що кожен маршрут під автентифікацією
