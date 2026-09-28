@@ -57,7 +57,8 @@ async def engine(database_url, alembic_config):
     finally:
         async with engine.begin() as conn:
             await conn.execute(text(
-                "TRUNCATE dam_prices, dam_days, dam_raw_snapshots, collection_runs RESTART IDENTITY"
+                "TRUNCATE dam_prices, dam_days, dam_raw_snapshots, notification_deliveries, collection_runs, "
+                "telegram_recipients RESTART IDENTITY"
             ))
         await engine.dispose()
 

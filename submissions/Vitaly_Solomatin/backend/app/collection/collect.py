@@ -15,6 +15,7 @@ from app.collection.lock import dam_writer_lock
 from app.collection.runs import RunLog
 from app.dam_source.hashing import changed_days as diff_days
 from app.dam_source.source import DamSource
+from app.notify.notifier import Notifier
 from app.storage.repository import DamRepository
 from app.timeutil import kyiv_today
 
@@ -35,6 +36,7 @@ async def collect_once(
     reference_date: date,
     trigger: str,
     run_id: int | None = None,
+    notifier: Notifier | None = None,
 ) -> CollectOutcome:
     """`run_id` — рядок журналу, створений викликачем заздалегідь (HTTP віддає його до збору)."""
     async with dam_writer_lock(engine) as acquired:
@@ -70,6 +72,10 @@ async def collect_once(
             return CollectOutcome(run_id, "error", error=error)
 
         await runs.finish(run_id, "success", changed)
+        if notifier is not None:
+            # Після фіксації success і всередині блокування: паралельний запуск не розішле ту саму зміну.
+            recalculated = [d for d in changed if d in stored]
+            await notifier.notify_run(run_id, changed, recalculated)
         return CollectOutcome(run_id, "success", tuple(changed))
 
 
@@ -82,12 +88,15 @@ async def main(argv: list[str] | None = None) -> int:
     from app.dam_source.source import OreeDamSource
     from app.storage.database import make_engine, make_session_factory
 
+    from app.notify.notifier import notifier_from_env
+
     engine = make_engine()
     sessions = make_session_factory(engine)
+    repository = DamRepository(sessions)
     try:
         outcome = await collect_once(
-            OreeDamSource(), DamRepository(sessions), RunLog(sessions), engine,
-            args.date or kyiv_today(), args.trigger,
+            OreeDamSource(), repository, RunLog(sessions), engine,
+            args.date or kyiv_today(), args.trigger, notifier=notifier_from_env(sessions, repository),
         )
     finally:
         await engine.dispose()

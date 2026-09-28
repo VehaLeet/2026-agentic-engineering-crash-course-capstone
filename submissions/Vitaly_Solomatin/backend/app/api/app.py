@@ -16,6 +16,7 @@ from app.api.runs_manager import RunManager
 from app.collection.collect import collect_once
 from app.collection.runs import RunInfo, RunLog
 from app.dam_source.source import DamSource
+from app.notify.notifier import Notifier, notifier_from_env
 from app.storage.repository import DamRepository
 from app.timeutil import kyiv_today
 
@@ -62,6 +63,7 @@ def create_app(
     engine: AsyncEngine | None = None,
     source: DamSource | None = None,
     now: Callable[[], datetime | None] = lambda: None,
+    notifier: Notifier | None = None,
 ) -> FastAPI:
 
     @asynccontextmanager
@@ -76,8 +78,12 @@ def create_app(
         repository = DamRepository(sessions)
         dam_source = source or OreeDamSource()
 
+        dam_notifier = notifier or notifier_from_env(sessions, repository)
+
         async def job(run_id: int):
-            return await collect_once(dam_source, repository, runs, db, kyiv_today(now()), "manual", run_id)
+            return await collect_once(
+                dam_source, repository, runs, db, kyiv_today(now()), "manual", run_id, notifier=dam_notifier
+            )
 
         app.state.runs = runs
         app.state.repository = repository

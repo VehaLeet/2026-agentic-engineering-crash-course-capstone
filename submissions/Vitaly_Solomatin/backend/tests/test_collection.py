@@ -72,7 +72,7 @@ async def test_run_table_shape(engine):
 
 async def test_downgrade_one_revision_keeps_dam_tables(sessions, alembic_config, repository):
     await repository.save_records([], {})
-    await asyncio.to_thread(command.downgrade, alembic_config, "-1")
+    await asyncio.to_thread(command.downgrade, alembic_config, "0001_dam_storage")
     try:
         async with sessions() as s:
             tables = await (await s.connection()).run_sync(lambda c: set(inspect(c).get_table_names()))

@@ -233,3 +233,28 @@ async def test_real_quarter_end_to_end(repository, sessions, fixture_bytes):
     assert await count(sessions, DamRawSnapshot) == 1
     assert await repository.get_records(min(hashes), max(hashes)) == sorted(rows, key=lambda r: (r.delivery_date, r.period))
     assert await repository.get_day_hashes(min(hashes), max(hashes)) == hashes
+
+
+async def test_telegram_schema_constraints(sessions):
+    from datetime import datetime, timezone
+    from sqlalchemy.exc import IntegrityError as IE
+    from app.storage.models import CollectionRun, NotificationDelivery, TelegramRecipient
+
+    now = datetime.now(timezone.utc)
+    async with sessions() as s, s.begin():
+        s.add(TelegramRecipient(chat_id="123", created_at=now))
+    with pytest.raises(IE):
+        async with sessions() as s, s.begin():
+            s.add(TelegramRecipient(chat_id="123", created_at=now))
+    async with sessions() as s, s.begin():
+        run = CollectionRun(started_at=now, trigger="manual")
+        s.add(run)
+        await s.flush()
+        run_id = run.id
+        s.add(NotificationDelivery(run_id=run_id, chat_id="123", status="sent", created_at=now))
+    with pytest.raises(IE):  # UNIQUE(run_id, chat_id)
+        async with sessions() as s, s.begin():
+            s.add(NotificationDelivery(run_id=run_id, chat_id="123", status="pending", created_at=now))
+    with pytest.raises(IE):  # CHECK status
+        async with sessions() as s, s.begin():
+            s.add(NotificationDelivery(run_id=run_id, chat_id="456", status="bogus", created_at=now))

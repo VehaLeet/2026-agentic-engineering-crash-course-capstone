@@ -4,7 +4,8 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    BigInteger, CHAR, CheckConstraint, Date, DateTime, Identity, Index, LargeBinary, Numeric, SmallInteger, Text,
+    BigInteger, Boolean, CHAR, CheckConstraint, Date, DateTime, ForeignKey, Identity, Index, LargeBinary, Numeric,
+    SmallInteger, Text, UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -74,3 +75,36 @@ class CollectionRun(Base):
         ARRAY(Date), nullable=False, server_default=text("'{}'::date[]")
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TelegramRecipient(Base):
+    """Отримувач сповіщень. Налаштування — у БД (бриф); керування: CLI, згодом API/UI."""
+
+    __tablename__ = "telegram_recipients"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # ціле (зокрема від'ємне) або @channel
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+DELIVERY_STATUSES = ("pending", "sent", "failed")
+
+
+class NotificationDelivery(Base):
+    """Доставка сповіщення про запуск одному отримувачу. UNIQUE(run_id, chat_id) — «не більше одного»."""
+
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint("run_id", "chat_id", name="uq_notification_deliveries_run_chat"),
+        CheckConstraint("status IN ('pending', 'sent', 'failed')", name="ck_notification_deliveries_status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("collection_runs.id"), nullable=False)
+    chat_id: Mapped[str] = mapped_column(Text, nullable=False)  # копія: видалення отримувача не губить історію
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("0"))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
