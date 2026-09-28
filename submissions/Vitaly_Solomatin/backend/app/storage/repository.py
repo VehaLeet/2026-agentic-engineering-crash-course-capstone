@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.dam_source.models import DamRecord
+from app.dam_source.hashing import day_hashes as compute_day_hashes
+from app.dam_source.models import DamRecord, QuarterFetch
 from app.storage.models import DamDay, DamPrice, DamRawSnapshot
 
 
@@ -16,6 +17,24 @@ class DamRepository:
         self.sessions = sessions
 
     async def save_records(self, records: Iterable[DamRecord], day_hashes: Mapping[date, str]) -> None:
+        async with self.sessions() as session, session.begin():
+            await self._upsert_records(session, list(records), day_hashes)
+
+    async def save_raw_snapshot(self, year: int, quarter: int, content_hash: str, raw: bytes) -> None:
+        async with self.sessions() as session, session.begin():
+            await self._insert_snapshot(session, year, quarter, content_hash, raw)
+
+    async def save_quarter(self, fetch: QuarterFetch) -> None:
+        """Записи, хеші діб і сирий знімок кварталу — однією транзакцією: або все, або нічого."""
+        async with self.sessions() as session, session.begin():
+            await self._upsert_records(session, list(fetch.records), compute_day_hashes(fetch.records))
+            await self._insert_snapshot(
+                session, fetch.quarter.year, fetch.quarter.quarter, fetch.content_hash, fetch.raw
+            )
+
+    async def _upsert_records(
+        self, session: AsyncSession, records: list[DamRecord], day_hashes: Mapping[date, str]
+    ) -> None:
         rows = [
             {
                 "delivery_date": r.delivery_date,
@@ -30,33 +49,33 @@ class DamRepository:
         ]
         if set(day_hashes) != {row["delivery_date"] for row in rows}:
             raise ValueError("day hashes must match record dates")
-        async with self.sessions() as session, session.begin():
-            if rows:
-                statement = insert(DamPrice).values(rows)
-                await session.execute(statement.on_conflict_do_update(
-                    index_elements=[DamPrice.delivery_date, DamPrice.period],
-                    set_={name: getattr(statement.excluded, name) for name in (
-                        "price", "volume_sell", "volume_buy", "declared_volume_sell", "declared_volume_buy"
-                    )},
-                ))
-            if day_hashes:
-                statement = insert(DamDay).values([
-                    {"delivery_date": day, "content_hash": hash_, "updated_at": datetime.now(timezone.utc)}
-                    for day, hash_ in day_hashes.items()
-                ])
-                await session.execute(statement.on_conflict_do_update(
-                    index_elements=[DamDay.delivery_date],
-                    set_={"content_hash": statement.excluded.content_hash,
-                          "updated_at": statement.excluded.updated_at},
-                ))
+        if rows:
+            statement = insert(DamPrice).values(rows)
+            await session.execute(statement.on_conflict_do_update(
+                index_elements=[DamPrice.delivery_date, DamPrice.period],
+                set_={name: getattr(statement.excluded, name) for name in (
+                    "price", "volume_sell", "volume_buy", "declared_volume_sell", "declared_volume_buy"
+                )},
+            ))
+        if day_hashes:
+            statement = insert(DamDay).values([
+                {"delivery_date": day, "content_hash": hash_, "updated_at": datetime.now(timezone.utc)}
+                for day, hash_ in day_hashes.items()
+            ])
+            await session.execute(statement.on_conflict_do_update(
+                index_elements=[DamDay.delivery_date],
+                set_={"content_hash": statement.excluded.content_hash,
+                      "updated_at": statement.excluded.updated_at},
+            ))
 
-    async def save_raw_snapshot(self, year: int, quarter: int, content_hash: str, raw: bytes) -> None:
-        async with self.sessions() as session, session.begin():
-            statement = insert(DamRawSnapshot).values(
-                year=year, quarter=quarter, content_hash=content_hash,
-                raw_content=raw, fetched_at=datetime.now(timezone.utc),
-            )
-            await session.execute(statement.on_conflict_do_nothing(index_elements=[DamRawSnapshot.content_hash]))
+    async def _insert_snapshot(
+        self, session: AsyncSession, year: int, quarter: int, content_hash: str, raw: bytes
+    ) -> None:
+        statement = insert(DamRawSnapshot).values(
+            year=year, quarter=quarter, content_hash=content_hash,
+            raw_content=raw, fetched_at=datetime.now(timezone.utc),
+        )
+        await session.execute(statement.on_conflict_do_nothing(index_elements=[DamRawSnapshot.content_hash]))
 
     async def get_records(self, date_from: date, date_to: date) -> list[DamRecord]:
         if date_from > date_to:
