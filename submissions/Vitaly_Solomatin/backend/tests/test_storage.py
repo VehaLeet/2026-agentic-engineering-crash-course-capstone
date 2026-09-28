@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 from alembic import command
+from alembic.script import ScriptDirectory
 from sqlalchemy import event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -74,9 +75,10 @@ def test_session_container_is_shared_b(database_url, shared_container_url):
     assert database_url == shared_container_url
 
 
-async def test_migration_version_and_schema(sessions):
+async def test_migration_version_and_schema(sessions, alembic_config):
+    head = ScriptDirectory.from_config(alembic_config).get_current_head()
     async with sessions() as session:
-        assert (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar_one() == "0001_dam_storage"
+        assert (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar_one() == head
         schema = await session.connection()
         tables = await schema.run_sync(lambda conn: set(inspect(conn).get_table_names()))
         pk = await schema.run_sync(lambda conn: inspect(conn).get_pk_constraint("dam_prices"))

@@ -50,14 +50,21 @@ def alembic_config(database_url):
 
 
 @pytest.fixture
-async def sessions(database_url, alembic_config):
+async def engine(database_url, alembic_config):
     engine = make_engine(database_url)
     try:
-        yield make_session_factory(engine)
+        yield engine
     finally:
         async with engine.begin() as conn:
-            await conn.execute(text("TRUNCATE dam_prices, dam_days, dam_raw_snapshots RESTART IDENTITY"))
+            await conn.execute(text(
+                "TRUNCATE dam_prices, dam_days, dam_raw_snapshots, collection_runs RESTART IDENTITY"
+            ))
         await engine.dispose()
+
+
+@pytest.fixture
+def sessions(engine):
+    return make_session_factory(engine)
 
 
 @pytest.fixture

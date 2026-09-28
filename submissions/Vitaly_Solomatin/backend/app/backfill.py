@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import TextIO
 
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.collection.lock import dam_writer_lock
 from app.dam_source.models import Quarter
 from app.dam_source.source import DamSource
 from app.storage.repository import DamRepository
@@ -102,6 +105,25 @@ async def run_backfill(
     return report
 
 
+async def run_locked_backfill(
+    engine: AsyncEngine,
+    source: DamSource,
+    repository: DamRepository,
+    quarters: list[Quarter],
+    delay: float = DEFAULT_DELAY,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    out: TextIO = sys.stdout,
+) -> int:
+    """Бекфіл під тим самим блокуванням, що й збір. Повертає код виходу."""
+    async with dam_writer_lock(engine) as acquired:
+        if not acquired:
+            print("  блокування записувачів РДН зайняте (іде збір або інший бекфіл) — нічого не записано",
+                  file=out)
+            return 1
+        report = await run_backfill(source, repository, quarters, delay, sleep, out)
+    return report.exit_code
+
+
 def parse_args(argv: list[str] | None, today: date) -> tuple[list[Quarter], float]:
     parser = argparse.ArgumentParser(prog="backfill", description="Бекфіл історії РДН ОРЕЕ")
     parser.add_argument("--from", dest="start", default=str(FIRST_QUARTER), help="YYYYQN, типово 2019Q3")
@@ -128,10 +150,11 @@ async def main(argv: list[str] | None = None, today: date | None = None) -> int:
 
     engine = make_engine()
     try:
-        report = await run_backfill(OreeDamSource(), DamRepository(make_session_factory(engine)), quarters, delay)
+        return await run_locked_backfill(
+            engine, OreeDamSource(), DamRepository(make_session_factory(engine)), quarters, delay
+        )
     finally:
         await engine.dispose()
-    return report.exit_code
 
 
 if __name__ == "__main__":

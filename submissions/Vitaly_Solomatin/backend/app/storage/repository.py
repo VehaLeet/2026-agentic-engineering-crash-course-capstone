@@ -26,11 +26,19 @@ class DamRepository:
 
     async def save_quarter(self, fetch: QuarterFetch) -> None:
         """Записи, хеші діб і сирий знімок кварталу — однією транзакцією: або все, або нічого."""
+        await self.save_collected(fetch.records, compute_day_hashes(fetch.records), [fetch])
+
+    async def save_collected(
+        self, records: Iterable[DamRecord], day_hashes: Mapping[date, str], fetches: Iterable[QuarterFetch]
+    ) -> None:
+        """Записи з хешами діб, потім знімки непорожніх файлів — одна транзакція."""
         async with self.sessions() as session, session.begin():
-            await self._upsert_records(session, list(fetch.records), compute_day_hashes(fetch.records))
-            await self._insert_snapshot(
-                session, fetch.quarter.year, fetch.quarter.quarter, fetch.content_hash, fetch.raw
-            )
+            await self._upsert_records(session, list(records), day_hashes)
+            for fetch in fetches:
+                if fetch.records:
+                    await self._insert_snapshot(
+                        session, fetch.quarter.year, fetch.quarter.quarter, fetch.content_hash, fetch.raw
+                    )
 
     async def _upsert_records(
         self, session: AsyncSession, records: list[DamRecord], day_hashes: Mapping[date, str]

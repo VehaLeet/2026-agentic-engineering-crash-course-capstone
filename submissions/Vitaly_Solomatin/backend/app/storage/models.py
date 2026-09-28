@@ -3,7 +3,11 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CHAR, CheckConstraint, Date, DateTime, Identity, LargeBinary, Numeric, SmallInteger
+from sqlalchemy import (
+    BigInteger, CHAR, CheckConstraint, Date, DateTime, Identity, Index, LargeBinary, Numeric, SmallInteger, Text,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -42,3 +46,31 @@ class DamRawSnapshot(Base):
     content_hash: Mapped[str] = mapped_column(CHAR(64), unique=True, nullable=False)
     raw_content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+RUN_STATUSES = ("success", "no_changes", "no_data", "error", "skipped_locked")
+RUN_TRIGGERS = ("scheduled", "manual")
+
+
+class CollectionRun(Base):
+    """Журнал запусків. Рядок створюється на старті: status/finished_at NULL, поки запуск триває."""
+
+    __tablename__ = "collection_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IS NULL OR status IN ('success', 'no_changes', 'no_data', 'error', 'skipped_locked')",
+            name="ck_collection_runs_status",
+        ),
+        CheckConstraint("trigger IN ('scheduled', 'manual')", name="ck_collection_runs_trigger"),
+        Index("ix_collection_runs_started_at", text("started_at DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_days: Mapped[list[date]] = mapped_column(
+        ARRAY(Date), nullable=False, server_default=text("'{}'::date[]")
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
