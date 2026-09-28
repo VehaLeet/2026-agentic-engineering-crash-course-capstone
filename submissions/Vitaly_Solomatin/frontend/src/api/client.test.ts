@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiContractError, ApiUnauthorized, ApiUnavailable, getHealth, getStatus } from './client.ts'
+import { ApiContractError, ApiUnavailable, getHealth, getStatus } from './client.ts'
 
 // Реальний приклад відповіді /status (контракт http-api).
 const STATUS = {
@@ -31,7 +31,7 @@ describe('getStatus', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/status', expect.anything())
   })
 
-  it('does not set Authorization manually — the browser owns credentials', async () => {
+  it('sends no credentials — the API has no authentication', async () => {
     const fetchMock = respond(200, STATUS)
     await getStatus()
     const init = fetchMock.mock.calls[0][1] as RequestInit
@@ -39,9 +39,9 @@ describe('getStatus', () => {
     expect(init.credentials ?? 'same-origin').toBe('same-origin')
   })
 
-  it('401 -> ApiUnauthorized', async () => {
+  it('401 is an unexpected response now -> ApiContractError', async () => {
     respond(401, { detail: 'authentication required' })
-    await expect(getStatus()).rejects.toBeInstanceOf(ApiUnauthorized)
+    await expect(getStatus()).rejects.toBeInstanceOf(ApiContractError)
   })
 
   it.each([502, 504, 500])('%i -> ApiUnavailable', async (code) => {

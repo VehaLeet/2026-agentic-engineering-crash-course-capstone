@@ -2,14 +2,6 @@ import type { SystemStatus } from './types.ts'
 
 const BASE = '/api'
 
-/** 401: креди не введено або скасовано. Системне вікно браузера показує сам браузер. */
-export class ApiUnauthorized extends Error {
-  constructor() {
-    super('authentication required')
-    this.name = 'ApiUnauthorized'
-  }
-}
-
 /** Мережева помилка або 5xx (зокрема 502/504 від проксі, коли backend не запущено). */
 export class ApiUnavailable extends Error {
   constructor(message: string) {
@@ -29,12 +21,11 @@ export class ApiContractError extends Error {
 async function request(path: string): Promise<unknown> {
   let response: Response
   try {
-    // Authorization вручну не додається: кредами керує браузер (credentials: 'same-origin').
+    // Автентифікації немає (ранній MVP): облікові дані не надсилаються.
     response = await fetch(`${BASE}${path}`, { headers: { Accept: 'application/json' } })
   } catch (e) {
     throw new ApiUnavailable(`мережева помилка: ${(e as Error).message}`)
   }
-  if (response.status === 401) throw new ApiUnauthorized()
   if (response.status >= 500) throw new ApiUnavailable(`HTTP ${response.status}`)
   if (!response.ok) throw new ApiContractError(`неочікуваний HTTP ${response.status}`)
   try {

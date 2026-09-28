@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { expect, it } from 'vitest'
+import type { Connection } from '../state/connection.ts'
 import { ConnectionPanel } from './ConnectionPanel.tsx'
 
 it('loading', () => {
@@ -18,14 +19,7 @@ it('ok with an empty log shows "ще не було"', () => {
   expect(screen.getAllByText('ще не було')).toHaveLength(2)
 })
 
-it('unauthorized offers a login link to a top-level protected URL', () => {
-  render(<ConnectionPanel connection={{ state: 'unauthorized' }} />)
-  expect(screen.getByText('Потрібна автентифікація')).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'Увійти' })).toHaveAttribute('href', '/api/status')
-  expect(screen.queryByText(/недоступний/)).not.toBeInTheDocument()
-})
-
-it('unavailable is distinct from unauthorized', () => {
+it('unavailable', () => {
   render(<ConnectionPanel connection={{ state: 'unavailable' }} />)
   expect(screen.getByText('Backend недоступний')).toBeInTheDocument()
   expect(screen.queryByText(/автентифікація/)).not.toBeInTheDocument()
@@ -34,4 +28,15 @@ it('unavailable is distinct from unauthorized', () => {
 it('contract error is shown, not empty values', () => {
   render(<ConnectionPanel connection={{ state: 'error', message: 'неочікувана відповідь /status' }} />)
   expect(screen.getByRole('alert')).toHaveTextContent('неочікувана відповідь /status')
+})
+
+it.each<Connection>([
+  { state: 'loading' },
+  { state: 'ok', lastCheck: null, lastUpdate: null },
+  { state: 'unavailable' },
+  { state: 'error', message: 'x' },
+])('no login link or auth wording in state $state', (connection) => {
+  const { container } = render(<ConnectionPanel connection={connection} />)
+  expect(screen.queryByRole('link', { name: 'Увійти' })).not.toBeInTheDocument()
+  expect(container.textContent).not.toMatch(/автентифіка/i)
 })

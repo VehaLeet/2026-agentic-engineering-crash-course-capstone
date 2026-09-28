@@ -7,7 +7,7 @@ from app.dam_source.hashing import day_hashes
 from app.dam_source.models import DamRecord
 from app.dam_source.parser import parse_csv
 from tests.fakes import FakeDamSource
-from tests.test_api import AUTH, running
+from tests.test_api import running
 
 D = Decimal
 JULY_1 = date(2026, 7, 1)
@@ -32,7 +32,7 @@ def full_day(day, price="100.00", periods=24):
 
 async def prices(engine, **params):
     async with running(engine, FakeDamSource()) as (_, client):
-        return await client.get("/prices", params=params, auth=AUTH)
+        return await client.get("/prices", params=params)
 
 
 # 1. Репозиторій
@@ -123,10 +123,11 @@ async def test_inclusive_bounds_and_empty_range(repository, engine):
     assert empty.status_code == 200 and empty.json()["price"] == [] and empty.json()["period"] == []
 
 
-async def test_requires_auth(engine):
+async def test_no_credentials_needed(repository, engine):
+    await save(repository, full_day(JULY_1))
     async with running(engine, FakeDamSource()) as (_, client):
         r = await client.get("/prices", params={"date_from": "2026-07-01", "date_to": "2026-07-01"})
-    assert r.status_code == 401
+    assert r.status_code == 200 and len(r.json()["price"]) == 24
 
 
 # 3. Валідація
@@ -151,7 +152,7 @@ class ExplodingRepo:
 async def test_inverted_range_rejected_before_db(engine, resolution):
     async with running(engine, FakeDamSource()) as (app, client):
         app.state.repository = ExplodingRepo()
-        r = await client.get("/prices", auth=AUTH,
+        r = await client.get("/prices",
                              params={"date_from": "2026-07-05", "date_to": "2026-07-01", "resolution": resolution})
     assert r.status_code == 422
 

@@ -5,14 +5,13 @@ React + TypeScript + Vite + Zustand. Фронтенд звертається д�
 
 ## Запуск для розробки
 
-Потрібні Node.js ≥ 20, Docker і `uv`. У корені репозиторію має бути `.env` (див. `.env.example`),
-зокрема `API_USERNAME` і `API_PASSWORD`.
+Потрібні Node.js ≥ 20, Docker і `uv`. У корені репозиторію має бути `.env` (див. `.env.example`).
 
 ```sh
 # 1. База і backend (з кореня репозиторію)
 docker compose up -d postgres
 set -a && . ./.env && set +a
-cd backend && uv run uvicorn app.api.main:app --workers 1     # http://localhost:8000
+cd backend && uv run python -m app.api                       # http://localhost:8000
 
 # 2. Frontend (в іншому терміналі)
 cd frontend
@@ -23,15 +22,12 @@ npm run dev                                                   # http://localhost
 Backend на іншій адресі: `VITE_API_TARGET=http://localhost:8001 npm run dev`.
 Змінна читається лише конфігурацією dev-сервера і в зібраний бандл не потрапляє.
 
-## Вхід
+## Доступ
 
-Окремої форми входу немає. На перший захищений запит backend відповідає 401 з
-`WWW-Authenticate: Basic`, і браузер показує системне вікно логіна. Облікові дані — ті самі
-`API_USERNAME` / `API_PASSWORD`. Браузер пам'ятає їх до закриття, кнопки «Вийти» немає.
-
-Якщо вікно не з'явилось або ви натиснули «Скасувати», сторінка покаже «Потрібна
-автентифікація» з посиланням «Увійти»: воно відкриває захищену адресу напряму, і браузер
-гарантовано запитає пароль.
+Входу немає: це ранній MVP, і API не має автентифікації. Замість неї API слухає лише loopback:
+запускач `python -m app.api` відмовиться стартувати, якщо `API_HOST` не `127.0.0.1`, `::1` чи
+`localhost`. Не запускайте `uvicorn` напряму з `--host 0.0.0.0`: так API відкриється в мережу без
+жодного захисту.
 
 ## Перевірки
 

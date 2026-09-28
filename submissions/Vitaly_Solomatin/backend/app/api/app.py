@@ -1,18 +1,18 @@
-"""HTTP API: автентифікований ручний запуск збору, стан запусків, перевірка живості."""
+"""HTTP API: ручний запуск збору, стан запусків, ціни, перевірка живості.
 
-import secrets
+Автентифікації немає свідомо (ранній MVP): межа доступу — loopback, див. app/api/__main__.py.
+"""
+
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.runs_manager import RunManager
-from app.api.settings import ApiSettings
 from app.collection.collect import collect_once
 from app.collection.runs import RunInfo, RunLog
 from app.dam_source.source import DamSource
@@ -58,34 +58,11 @@ def _column(values) -> list:
     return [float(v) if v is not None and not isinstance(v, int) else v for v in values]
 
 
-_basic = HTTPBasic(auto_error=False)
-
-
-def _require_auth(settings: ApiSettings):
-    expected_user = settings.username.encode()
-    expected_password = settings.password.encode()
-
-    def check(credentials: Annotated[HTTPBasicCredentials | None, Depends(_basic)]) -> None:
-        if credentials is not None:
-            # Обидва порівняння виконуються завжди: час відповіді не видає, що саме хибне.
-            user_ok = secrets.compare_digest(credentials.username.encode(), expected_user)
-            password_ok = secrets.compare_digest(credentials.password.encode(), expected_password)
-            if user_ok & password_ok:
-                return
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required",
-                            headers={"WWW-Authenticate": 'Basic realm="oree-dam-monitor"'})
-
-    return check
-
-
 def create_app(
-    settings: ApiSettings | None = None,
     engine: AsyncEngine | None = None,
     source: DamSource | None = None,
     now: Callable[[], datetime | None] = lambda: None,
 ) -> FastAPI:
-    """Без кредів у налаштуваннях чи в env застосунок не будується (закрито за замовчуванням)."""
-    settings = settings or ApiSettings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -119,24 +96,21 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    # Автентифікація на рівні роутера: новий маршрут не лишиться відкритим випадково.
-    api = APIRouter(dependencies=[Depends(_require_auth(settings))])
-
-    @api.post("/collect", status_code=status.HTTP_202_ACCEPTED, response_model=CollectAccepted)
+    @app.post("/collect", status_code=status.HTTP_202_ACCEPTED, response_model=CollectAccepted)
     async def collect(request: Request, response: Response) -> CollectAccepted:
         run_id = await request.app.state.runs.start("manual")
         request.app.state.manager.start(run_id)
         response.headers["Location"] = f"/runs/{run_id}"
         return CollectAccepted(run_id=run_id, status_url=f"/runs/{run_id}")
 
-    @api.get("/runs/{run_id}", response_model=Run)
+    @app.get("/runs/{run_id}", response_model=Run)
     async def get_run(run_id: int, request: Request) -> Run:
         info = await request.app.state.runs.find(run_id)
         if info is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
         return Run.of(info)
 
-    @api.get("/status", response_model=SystemStatus)
+    @app.get("/status", response_model=SystemStatus)
     async def get_status(request: Request) -> SystemStatus:
         state = await request.app.state.runs.state()
         return SystemStatus(
@@ -145,7 +119,7 @@ def create_app(
             recent_errors=[Run.of(r) for r in state.recent_errors],
         )
 
-    @api.get("/prices")
+    @app.get("/prices")
     async def get_prices(
         request: Request,
         date_from: Annotated[date, Query()],
@@ -175,6 +149,4 @@ def create_app(
                 body[field] = _column(getattr(d, field) for d in days)
         return body
 
-    app.include_router(api)
-    app.state.protected_router = api  # для перевірки, що кожен маршрут під автентифікацією
     return app

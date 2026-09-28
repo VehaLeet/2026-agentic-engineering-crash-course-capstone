@@ -21,14 +21,6 @@ export function ConnectionPanel({ connection }: { connection: Connection }) {
           </dl>
         </section>
       )
-    case 'unauthorized':
-      return (
-        <section role="alert">
-          <p>Потрібна автентифікація</p>
-          {/* Перехід верхнього рівня гарантовано викликає системне вікно логіна браузера. */}
-          <a href="/api/status">Увійти</a>
-        </section>
-      )
     case 'unavailable':
       return (
         <section role="alert">

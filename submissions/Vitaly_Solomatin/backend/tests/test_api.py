@@ -9,7 +9,6 @@ from sqlalchemy import func, select
 
 from app.api.app import create_app
 from app.api.runs_manager import RunManager
-from app.api.settings import ApiSettings, ConfigError
 from app.backfill import parse_args
 from app.collection.collect import collect_once
 from app.collection.runs import RunLog
@@ -20,8 +19,6 @@ from tests.conftest import ROOT
 from tests.fakes import FakeDamSource
 from tests.test_collection import Q3, REF, held_lock, q3_file  # noqa: F401 (held_lock — фікстура)
 
-SETTINGS = ApiSettings("admin", "s3cret")
-AUTH = ("admin", "s3cret")
 UTC = timezone.utc
 
 
@@ -51,7 +48,7 @@ class GateSource(FakeDamSource):
 
 @asynccontextmanager
 async def running(engine, source, now=lambda: datetime(2026, 9, 28, 9, 0, tzinfo=UTC)):
-    app = create_app(SETTINGS, engine=engine, source=source, now=now)
+    app = create_app(engine=engine, source=source, now=now)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -65,22 +62,10 @@ async def run_rows(sessions) -> int:
 
 # 1. Конфігурація
 
-def test_env_example_has_api_credentials():
-    text = (ROOT / ".env.example").read_text()
-    assert "API_USERNAME=" in text and "API_PASSWORD=" in text
-
-
-@pytest.mark.parametrize("missing", ["API_USERNAME", "API_PASSWORD"])
-def test_app_refuses_to_build_without_credentials(monkeypatch, missing):
-    monkeypatch.setenv("API_USERNAME", "admin")
-    monkeypatch.setenv("API_PASSWORD", "s3cret")
-    monkeypatch.delenv(missing)
-    with pytest.raises(ConfigError, match=missing):
-        create_app()
-
-
-def test_settings_repr_hides_password():
-    assert "s3cret" not in repr(SETTINGS)
+def test_app_builds_without_credentials(monkeypatch):
+    monkeypatch.delenv("API_USERNAME", raising=False)
+    monkeypatch.delenv("API_PASSWORD", raising=False)
+    create_app()  # автентифікації немає: креди не потрібні й не читаються
 
 
 # 2. Опорна дата
@@ -118,36 +103,11 @@ async def test_precreated_run_finished_as_skipped_when_locked(repository, sessio
     assert await run_rows(sessions) == 1
 
 
-# 4. Застосунок і автентифікація
+# 4. Застосунок
 
 async def test_lifespan_sets_up_run_manager(engine):
     async with running(engine, FakeDamSource()) as (app, _):
         assert isinstance(app.state.manager, RunManager)
-
-
-async def test_no_credentials_is_401_with_basic_challenge(engine):
-    async with running(engine, FakeDamSource()) as (_, client):
-        r = await client.get("/status")
-    assert r.status_code == 401
-    assert r.headers["www-authenticate"].startswith("Basic")
-
-
-@pytest.mark.parametrize("auth", [("admin", "wrong"), ("root", "s3cret")], ids=["password", "username"])
-async def test_wrong_credentials_are_401(engine, auth):
-    async with running(engine, FakeDamSource()) as (_, client):
-        assert (await client.get("/status", auth=auth)).status_code == 401
-
-
-async def test_wrong_password_on_collect_creates_no_run(engine, sessions):
-    async with running(engine, FakeDamSource()) as (_, client):
-        r = await client.post("/collect", auth=("admin", "wrong"))
-    assert r.status_code == 401
-    assert await run_rows(sessions) == 0
-
-
-async def test_correct_credentials(engine):
-    async with running(engine, FakeDamSource()) as (_, client):
-        assert (await client.get("/status", auth=AUTH)).status_code == 200
 
 
 async def test_health_needs_no_auth_and_reveals_nothing(engine):
@@ -156,16 +116,17 @@ async def test_health_needs_no_auth_and_reveals_nothing(engine):
     assert r.status_code == 200 and r.json() == {"status": "ok"}
 
 
-async def test_every_route_except_health_requires_auth(engine):
+async def test_no_route_requires_credentials(engine):
     async with running(engine, FakeDamSource()) as (app, client):
-        public = {r.path for r in app.routes if isinstance(r, APIRoute)}
-        protected = [r for r in app.state.protected_router.routes if isinstance(r, APIRoute)]
-        assert public == {"/health"}
-        assert {r.path for r in protected} == {"/collect", "/runs/{run_id}", "/status", "/prices"}
-        for route in protected:
+        routes = [r for r in app.routes if isinstance(r, APIRoute)]
+        assert {r.path for r in routes} == {"/health", "/collect", "/runs/{run_id}", "/status", "/prices"}
+        for route in routes:
             path = route.path.replace("{run_id}", "1")
+            params = {"date_from": "2026-07-01", "date_to": "2026-07-01"} if path == "/prices" else None
             for method in route.methods:
-                assert (await client.request(method, path)).status_code == 401, (method, path)
+                r = await client.request(method, path, params=params)
+                assert r.status_code != 401, (method, path)
+        await app.state.manager.wait_all()
         for docs in ["/docs", "/redoc", "/openapi.json"]:
             assert (await client.get(docs)).status_code == 404
 
@@ -188,7 +149,7 @@ async def test_run_manager_tracks_and_drains_tasks():
 
 async def test_collect_returns_202_with_run_reference(engine):
     async with running(engine, GateSource({Q3: q3_file(2)})) as (app, client):
-        r = await client.post("/collect", auth=AUTH)
+        r = await client.post("/collect")
         await app.state.manager.wait_all()
     assert r.status_code == 202
     body = r.json()
@@ -200,9 +161,9 @@ async def test_collect_does_not_wait_for_source(engine):
     source = GateSource({Q3: q3_file(2)}, gated=True)
     async with running(engine, source) as (app, client):
         async with asyncio.timeout(1):
-            r = await client.post("/collect", auth=AUTH)
+            r = await client.post("/collect")
         await source.entered.wait()
-        pending = (await client.get(r.headers["location"], auth=AUTH)).json()
+        pending = (await client.get(r.headers["location"])).json()
         assert pending["status"] is None and pending["finished_at"] is None
         source.gate.set()
         await app.state.manager.wait_all()
@@ -210,9 +171,9 @@ async def test_collect_does_not_wait_for_source(engine):
 
 async def test_background_success_visible_via_run(engine):
     async with running(engine, GateSource({Q3: q3_file(2)})) as (app, client):
-        run_id = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        run_id = (await client.post("/collect")).json()["run_id"]
         await app.state.manager.wait_all()
-        run = (await client.get(f"/runs/{run_id}", auth=AUTH)).json()
+        run = (await client.get(f"/runs/{run_id}")).json()
     assert run["status"] == "success"
     assert run["changed_days"] == ["2026-07-01", "2026-07-02"]
     assert run["trigger"] == "manual"
@@ -220,9 +181,9 @@ async def test_background_success_visible_via_run(engine):
 
 async def test_background_failure_is_error_and_app_keeps_serving(engine):
     async with running(engine, GateSource(fail=True)) as (app, client):
-        run_id = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        run_id = (await client.post("/collect")).json()["run_id"]
         await app.state.manager.wait_all()
-        run = (await client.get(f"/runs/{run_id}", auth=AUTH)).json()
+        run = (await client.get(f"/runs/{run_id}")).json()
         health = await client.get("/health")
     assert run["status"] == "error" and "ОРЕЕ недоступний" in run["error_message"]
     assert health.status_code == 200
@@ -231,15 +192,15 @@ async def test_background_failure_is_error_and_app_keeps_serving(engine):
 async def test_two_concurrent_collects(engine):
     source = GateSource({Q3: q3_file(2)}, gated=True)
     async with running(engine, source) as (app, client):
-        first = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        first = (await client.post("/collect")).json()["run_id"]
         await source.entered.wait()  # перший тримає блокування
-        second = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        second = (await client.post("/collect")).json()["run_id"]
         assert first != second
-        while (await client.get(f"/runs/{second}", auth=AUTH)).json()["status"] is None:
+        while (await client.get(f"/runs/{second}")).json()["status"] is None:
             await asyncio.sleep(0.01)  # другий завершується одразу, не чекаючи першого
         source.gate.set()
         await app.state.manager.wait_all()
-        statuses = [(await client.get(f"/runs/{i}", auth=AUTH)).json()["status"] for i in (first, second)]
+        statuses = [(await client.get(f"/runs/{i}")).json()["status"] for i in (first, second)]
     assert statuses == ["success", "skipped_locked"]
 
 
@@ -247,7 +208,7 @@ async def test_reference_date_is_kyiv_today(engine):
     source = GateSource()
     now = lambda: datetime(2026, 9, 30, 22, 30, tzinfo=UTC)
     async with running(engine, source, now=now) as (app, client):
-        await client.post("/collect", auth=AUTH)
+        await client.post("/collect")
         await app.state.manager.wait_all()
     assert source.reference_dates == [date(2026, 10, 1)]
 
@@ -255,7 +216,7 @@ async def test_reference_date_is_kyiv_today(engine):
 async def test_shutdown_cancels_unfinished_run(engine, sessions):
     source = GateSource({Q3: q3_file(2)}, gated=True)
     async with running(engine, source) as (app, client):
-        run_id = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        run_id = (await client.post("/collect")).json()["run_id"]
         await source.entered.wait()
         [task] = app.state.manager._tasks
     assert task.cancelled()
@@ -267,9 +228,9 @@ async def test_shutdown_cancels_unfinished_run(engine, sessions):
 
 async def test_run_contract(engine):
     async with running(engine, GateSource({Q3: q3_file(2)})) as (app, client):
-        run_id = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        run_id = (await client.post("/collect")).json()["run_id"]
         await app.state.manager.wait_all()
-        run = (await client.get(f"/runs/{run_id}", auth=AUTH)).json()
+        run = (await client.get(f"/runs/{run_id}")).json()
     assert set(run) == {"id", "started_at", "finished_at", "status", "trigger", "changed_days", "error_message"}
     for field in ("started_at", "finished_at"):
         assert datetime.fromisoformat(run[field]).utcoffset() is not None
@@ -278,19 +239,19 @@ async def test_run_contract(engine):
 
 async def test_unknown_and_invalid_run_ids(engine):
     async with running(engine, FakeDamSource()) as (_, client):
-        missing = await client.get("/runs/999999", auth=AUTH)
-        invalid = await client.get("/runs/abc", auth=AUTH)
+        missing = await client.get("/runs/999999")
+        invalid = await client.get("/runs/abc")
     assert missing.status_code == 404 and missing.json() == {"detail": "run not found"}
     assert invalid.status_code == 422
 
 
 async def test_status_last_run_vs_last_update(engine):
     async with running(engine, GateSource({Q3: q3_file(2)})) as (app, client):
-        first = (await client.post("/collect", auth=AUTH)).json()["run_id"]
+        first = (await client.post("/collect")).json()["run_id"]
         await app.state.manager.wait_all()
-        await client.post("/collect", auth=AUTH)  # ті самі дані -> no_changes
+        await client.post("/collect")  # ті самі дані -> no_changes
         await app.state.manager.wait_all()
-        state = (await client.get("/status", auth=AUTH)).json()
+        state = (await client.get("/status")).json()
     assert state["last_run"]["status"] == "no_changes"
     assert state["last_update"]["id"] == first
     assert state["recent_errors"] == []
@@ -298,6 +259,6 @@ async def test_status_last_run_vs_last_update(engine):
 
 async def test_status_on_empty_log(engine):
     async with running(engine, FakeDamSource()) as (_, client):
-        r = await client.get("/status", auth=AUTH)
+        r = await client.get("/status")
     assert r.status_code == 200
     assert r.json() == {"last_run": None, "last_update": None, "recent_errors": []}

@@ -1,10 +1,9 @@
 import { create } from 'zustand'
-import { ApiContractError, ApiUnauthorized, ApiUnavailable, getHealth, getStatus } from '../api/client.ts'
+import { ApiContractError, ApiUnavailable, getHealth, getStatus } from '../api/client.ts'
 
 export type Connection =
   | { state: 'loading' }
   | { state: 'ok'; lastCheck: string | null; lastUpdate: string | null }
-  | { state: 'unauthorized' }
   | { state: 'unavailable' }
   | { state: 'error'; message: string }
 
@@ -17,7 +16,7 @@ export const useConnection = create<ConnectionStore>((set) => ({
   connection: { state: 'loading' },
   check: async () => {
     set({ connection: { state: 'loading' } })
-    // Спершу /health без кредів: так «backend лежить» ніколи не сплутається з «немає автентифікації».
+    // Спершу /health: якщо backend не живий, /status не запитуємо.
     try {
       await getHealth()
     } catch (e) {
@@ -34,8 +33,7 @@ export const useConnection = create<ConnectionStore>((set) => ({
         },
       })
     } catch (e) {
-      if (e instanceof ApiUnauthorized) set({ connection: { state: 'unauthorized' } })
-      else if (e instanceof ApiUnavailable) set({ connection: { state: 'unavailable' } })
+      if (e instanceof ApiUnavailable) set({ connection: { state: 'unavailable' } })
       else set({ connection: { state: 'error', message: (e as Error).message } })
     }
   },

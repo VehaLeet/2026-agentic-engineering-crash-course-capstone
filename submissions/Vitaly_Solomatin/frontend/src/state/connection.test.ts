@@ -24,13 +24,6 @@ it('unavailable when /health fails, and /status is not called', async () => {
   expect(getStatus).not.toHaveBeenCalled()
 })
 
-it('unauthorized on 401 from /status', async () => {
-  getHealth.mockResolvedValue({ status: 'ok' })
-  getStatus.mockRejectedValue(new client.ApiUnauthorized())
-  await useConnection.getState().check()
-  expect(state()).toEqual({ state: 'unauthorized' })
-})
-
 it('error on contract mismatch', async () => {
   getHealth.mockResolvedValue({ status: 'ok' })
   getStatus.mockRejectedValue(new client.ApiContractError('неочікувана відповідь /status'))
