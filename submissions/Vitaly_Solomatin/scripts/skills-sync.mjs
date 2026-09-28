@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Copy every skill from the shared .agents/skills/ folder (read by Cursor, Codex, Copilot, Gemini CLI, Amp)
-// into .claude/skills/ (the only project folder Claude Code reads). Idempotent; run: pnpm skills:sync
+// into .claude/skills/ (the only project folder Claude Code reads). Idempotent; run: node scripts/skills-sync.mjs
 // Why a copy and not a symlink: symlinks on Windows need Developer Mode / admin, copies work everywhere.
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";

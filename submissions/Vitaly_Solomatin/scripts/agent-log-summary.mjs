@@ -4,7 +4,7 @@
 //   executed  = PostToolUse + PostToolUseFailure lines ("X actually ran")
 //   blocked   = proposed lines with no matching executed line (same id) — denied by a hook, a rule or the human
 //   failed    = executed lines with a non-zero exit
-// Usage: pnpm agent:log            (or: node scripts/agent-log-summary.mjs [path/to/actions.jsonl])
+// Usage: node scripts/agent-log-summary.mjs [path/to/actions.jsonl]
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
