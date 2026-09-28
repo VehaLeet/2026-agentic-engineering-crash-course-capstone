@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { ConnectionPanel } from './components/ConnectionPanel.tsx'
+import { DataView } from './components/DataView.tsx'
 import { useConnection } from './state/connection.ts'
 
 export default function App() {
@@ -11,9 +12,16 @@ export default function App() {
   }, [check])
 
   return (
-    <main>
-      <h1>OREE DAM Monitor</h1>
-      <ConnectionPanel connection={connection} />
-    </main>
+    <>
+      <header className="app-header">
+        <h1>OREE DAM Monitor</h1>
+      </header>
+      <main>
+        <section className="card">
+          <ConnectionPanel connection={connection} />
+        </section>
+        <DataView />
+      </main>
+    </>
   )
 }

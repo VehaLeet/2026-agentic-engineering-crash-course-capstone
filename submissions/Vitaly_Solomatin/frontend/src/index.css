@@ -1,20 +1,155 @@
 :root {
+  /* --color-* записує applyTheme() з src/theme.ts — палітра визначена лише там. */
   font-family: system-ui, sans-serif;
   line-height: 1.5;
+  color: var(--color-gray-900);
+  background: var(--color-gray-50);
+}
+
+body {
+  margin: 0;
+}
+
+.app-header {
+  background: var(--color-navy-900);
+  color: var(--color-white);
+  padding: 0.75rem 1.5rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 main {
-  max-width: 48rem;
-  margin: 2rem auto;
+  max-width: 72rem;
+  margin: 1.5rem auto;
   padding: 0 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.card {
+  background: var(--color-white);
+  border: 1px solid var(--color-gray-300);
+  border-radius: 2px;
+  padding: 1rem 1.25rem;
+}
+
+.muted {
+  color: var(--color-gray-600);
 }
 
 dl {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0;
+}
+
+dt {
+  color: var(--color-gray-600);
 }
 
 dd {
   margin: 0;
+}
+
+/* Помилка позначається текстом, role="alert" і рамкою — не лише кольором. */
+[role='alert'] {
+  border-left: 4px solid var(--color-navy-900);
+  padding-left: 0.75rem;
+}
+
+.filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1.25rem;
+}
+
+.filter label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-gray-600);
+}
+
+button,
+input {
+  font: inherit;
+  border-radius: 2px;
+}
+
+input[type='date'] {
+  border: 1px solid var(--color-gray-300);
+  padding: 0.3rem 0.5rem;
+  color: var(--color-gray-900);
+  background: var(--color-white);
+}
+
+button {
+  border: 1px solid var(--color-navy-900);
+  background: var(--color-white);
+  color: var(--color-navy-900);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--color-navy-700);
+  color: var(--color-navy-700);
+}
+
+button[aria-pressed='true'] {
+  background: var(--color-navy-900);
+  color: var(--color-white);
+}
+
+button:disabled {
+  border-color: var(--color-gray-300);
+  color: var(--color-gray-600);
+  cursor: not-allowed;
+}
+
+.chart {
+  height: 22rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--color-gray-300);
+  text-align: right;
+  white-space: nowrap;
+}
+
+th:first-child,
+td:first-child {
+  text-align: left;
+}
+
+th {
+  color: var(--color-gray-600);
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--color-gray-50);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
 }

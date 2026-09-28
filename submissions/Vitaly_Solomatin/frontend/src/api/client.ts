@@ -10,6 +10,14 @@ export class ApiUnavailable extends Error {
   }
 }
 
+/** 422: запит відхилено валідацією API; detail — повідомлення API для користувача. */
+export class ApiValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ApiValidationError'
+  }
+}
+
 /** 200, але тіло не відповідає контракту — краще явна помилка, ніж тихі undefined. */
 export class ApiContractError extends Error {
   constructor(message: string) {
@@ -18,7 +26,7 @@ export class ApiContractError extends Error {
   }
 }
 
-async function request(path: string): Promise<unknown> {
+export async function request(path: string): Promise<unknown> {
   let response: Response
   try {
     // Автентифікації немає (ранній MVP): облікові дані не надсилаються.
@@ -27,6 +35,11 @@ async function request(path: string): Promise<unknown> {
     throw new ApiUnavailable(`мережева помилка: ${(e as Error).message}`)
   }
   if (response.status >= 500) throw new ApiUnavailable(`HTTP ${response.status}`)
+  if (response.status === 422) {
+    const body = await response.json().catch(() => null)
+    const detail = typeof body?.detail === 'string' ? body.detail : 'некоректний запит'
+    throw new ApiValidationError(detail)
+  }
   if (!response.ok) throw new ApiContractError(`неочікуваний HTTP ${response.status}`)
   try {
     return await response.json()
@@ -52,3 +65,4 @@ export async function getStatus(): Promise<SystemStatus> {
   }
   return body as unknown as SystemStatus
 }
+
