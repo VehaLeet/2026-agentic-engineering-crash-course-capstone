@@ -19,6 +19,7 @@ from app.collection.lock import dam_writer_lock
 from app.dam_source.models import Quarter
 from app.dam_source.source import DamSource
 from app.storage.repository import DamRepository
+from app.timeutil import kyiv_today
 
 FIRST_QUARTER = Quarter(2019, 3)  # 01.07.2019 — запуск РДН; 2019Q2 порожній
 DEFAULT_DELAY = 2.0
@@ -143,7 +144,7 @@ def parse_args(argv: list[str] | None, today: date) -> tuple[list[Quarter], floa
 
 async def main(argv: list[str] | None = None, today: date | None = None) -> int:
     # Аргументи перевіряються до будь-якого з'єднання з ОРЕЕ чи БД.
-    quarters, delay = parse_args(argv, today or date.today())
+    quarters, delay = parse_args(argv, today or kyiv_today())
 
     from app.dam_source.source import OreeDamSource
     from app.storage.database import make_engine, make_session_factory

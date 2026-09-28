@@ -16,6 +16,7 @@ from app.collection.runs import RunLog
 from app.dam_source.hashing import changed_days as diff_days
 from app.dam_source.source import DamSource
 from app.storage.repository import DamRepository
+from app.timeutil import kyiv_today
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,15 +34,17 @@ async def collect_once(
     engine: AsyncEngine,
     reference_date: date,
     trigger: str,
+    run_id: int | None = None,
 ) -> CollectOutcome:
+    """`run_id` — рядок журналу, створений викликачем заздалегідь (HTTP віддає його до збору)."""
     async with dam_writer_lock(engine) as acquired:
+        if run_id is None:
+            run_id = await runs.start(trigger)  # на старті: загибель процесу лишить видимий слід
         if not acquired:
             # Не помилка і не «без змін»: інший записувач уже працює, чекати не будемо.
-            run_id = await runs.start(trigger)
             await runs.finish(run_id, "skipped_locked")
             return CollectOutcome(run_id, "skipped_locked")
 
-        run_id = await runs.start(trigger)  # на старті: загибель процесу лишить видимий слід
         try:
             result = await source.collect_for(reference_date)
             if not result.records:
@@ -84,7 +87,7 @@ async def main(argv: list[str] | None = None) -> int:
     try:
         outcome = await collect_once(
             OreeDamSource(), DamRepository(sessions), RunLog(sessions), engine,
-            args.date or date.today(), args.trigger,
+            args.date or kyiv_today(), args.trigger,
         )
     finally:
         await engine.dispose()

@@ -63,6 +63,11 @@ class RunLog:
         async with self.sessions() as session:
             return _info(await session.get_one(CollectionRun, run_id))
 
+    async def find(self, run_id: int) -> RunInfo | None:
+        async with self.sessions() as session:
+            run = await session.get(CollectionRun, run_id)
+            return run and _info(run)
+
     async def state(self, errors_limit: int = 5) -> RunState:
         async with self.sessions() as session:
             newest = select(CollectionRun).order_by(desc(CollectionRun.started_at), desc(CollectionRun.id))
