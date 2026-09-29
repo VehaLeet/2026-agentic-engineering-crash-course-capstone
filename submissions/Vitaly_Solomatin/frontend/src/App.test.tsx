@@ -23,3 +23,16 @@ it('shows the refresh button once the API is reachable', async () => {
   const { findByRole } = render(<App />)
   expect(await findByRole('button', { name: 'Оновити зараз' })).toBeInTheDocument()
 })
+
+it('renders settings instead of data on #settings', async () => {
+  const { useSettings } = await import('./state/settings.ts')
+  const load = vi.fn().mockResolvedValue(undefined)
+  useSettings.setState({ settings: { state: 'loading' }, load })
+  useConnection.setState({ connection: { state: 'loading' }, check: vi.fn().mockResolvedValue(undefined) })
+  window.location.hash = '#settings'
+  const { getByText, queryByRole } = render(<App />)
+  expect(getByText('Завантаження налаштувань…')).toBeInTheDocument()
+  expect(queryByRole('button', { name: 'Оновити зараз' })).toBeNull()
+  expect(load).toHaveBeenCalledTimes(1)
+  window.location.hash = ''
+})

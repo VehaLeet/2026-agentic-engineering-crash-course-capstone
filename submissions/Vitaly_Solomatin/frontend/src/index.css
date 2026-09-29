@@ -180,3 +180,138 @@ tbody tr:nth-child(even) {
   margin: 0;
   padding-left: 1.25rem;
 }
+
+/* Вкладки в шапці: вибрана — суцільний білий фон, як aria-pressed у кнопок. */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.tabs button {
+  border-color: var(--color-white);
+  background: transparent;
+  color: var(--color-white);
+}
+
+.tabs button[aria-selected='true'] {
+  background: var(--color-white);
+  color: var(--color-navy-900);
+}
+
+.tabs button:hover:not(:disabled) {
+  border-color: var(--color-white);
+  color: var(--color-white);
+  text-decoration: underline;
+}
+
+.tabs button[aria-selected='true']:hover {
+  color: var(--color-navy-900);
+}
+
+/* Налаштування */
+.card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.recipients h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.9375rem;
+}
+
+.settings-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.settings-form label:not(.checkbox) {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-gray-600);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recipients ul {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.recipient {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-gray-300);
+}
+
+.recipient .checkbox {
+  min-width: 14rem;
+}
+
+.recipient .feedback {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* Повідомлення розрізняються текстом і рамкою, не лише кольором (палітра без червоного). */
+.feedback {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+}
+
+.feedback-ok {
+  color: var(--color-gray-600);
+}
+
+.feedback-warning {
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed var(--color-gray-600);
+}
+
+.feedback-error:not([role='alert']) {
+  padding: 0.25rem 0.5rem;
+  border-left: 4px solid var(--color-navy-900);
+}
+
+/* Кандидати в отримувачі */
+.candidates {
+  margin-top: 1rem;
+}
+
+.candidates ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.candidate {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) 1fr 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-gray-300);
+}
+
+@media (max-width: 40rem) {
+  .candidate {
+    grid-template-columns: 1fr auto;
+  }
+}

@@ -17,3 +17,38 @@ export interface SystemStatus {
   last_update: Run | null // останній success
   recent_errors: Run[]
 }
+
+// Налаштування (openspec/specs/collection-schedule, openspec/specs/telegram-settings).
+
+export const INTERVAL_MIN = 5 // хвилин; ті самі межі перевіряє бекенд
+export const INTERVAL_MAX = 1440
+
+export interface Schedule {
+  enabled: boolean
+  interval_minutes: number
+  next_run_at: string | null // ISO 8601; null — розклад вимкнено
+}
+
+export interface NotificationsSettings {
+  enabled: boolean
+  token_configured: boolean
+}
+
+export interface Recipient {
+  chat_id: string
+  enabled: boolean
+}
+
+export interface TestResult {
+  ok: boolean
+  error?: string | null
+}
+
+export interface Candidate {
+  chat_id: string
+  type: string // private | group | supergroup | channel
+  title: string
+  username: string | null
+  last_seen_at: string // ISO 8601
+  added: boolean
+}
