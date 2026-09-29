@@ -49,3 +49,33 @@ def test_env_example_has_no_credentials_and_documents_host():
     text = (ROOT / ".env.example").read_text()
     assert "API_USERNAME" not in text and "API_PASSWORD" not in text
     assert "# API_HOST=127.0.0.1" in text
+
+
+# Режим контейнера
+
+def test_container_mode_allows_any_address_inside_container(tmp_path):
+    marker = tmp_path / ".dockerenv"
+    marker.touch()
+    assert launcher.resolve_host("0.0.0.0", container_mode=True, markers=[marker]) == "0.0.0.0"
+    assert launcher.resolve_host("127.0.0.1", container_mode=True, markers=[marker]) == "127.0.0.1"
+
+
+def test_container_mode_still_rejects_interface_addresses(tmp_path):
+    marker = tmp_path / ".dockerenv"
+    marker.touch()
+    with pytest.raises(launcher.ConfigError, match=r"192\.168\.1\.10"):
+        launcher.resolve_host("192.168.1.10", container_mode=True, markers=[marker])
+
+
+def test_container_mode_outside_container_is_refused(tmp_path):
+    with pytest.raises(launcher.ConfigError, match="лише всередині контейнера"):
+        launcher.resolve_host("0.0.0.0", container_mode=True, markers=[tmp_path / "missing"])
+
+
+def test_launcher_refuses_container_flag_on_host(runs, monkeypatch, capsys):
+    monkeypatch.setattr(launcher, "CONTAINER_MARKERS", ())
+    monkeypatch.setenv("API_IN_CONTAINER", "1")
+    monkeypatch.setenv("API_HOST", "0.0.0.0")
+    assert launcher.main() == 2
+    assert runs == []
+    assert "лише всередині контейнера" in capsys.readouterr().err

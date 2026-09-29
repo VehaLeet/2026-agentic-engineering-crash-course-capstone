@@ -15,5 +15,29 @@ services:
       timeout: 2s
       retries: 15
 
+  # API з планувальником. Міграції застосовуються на старті (див. backend/Dockerfile).
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Перекриває localhost-адресу з .env: у мережі compose база — це сервіс postgres.
+      DATABASE_URL: postgresql+asyncpg://dam:dam@postgres:5432/dam
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"   # лише localhost: API без автентифікації
+
+  # Зібраний веб-інтерфейс за nginx; /api проксується на backend.
+  web:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:80"     # лише localhost
+
 volumes:
   postgres_data:
