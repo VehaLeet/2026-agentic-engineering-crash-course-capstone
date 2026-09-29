@@ -47,7 +47,8 @@
       "Bash(cat .env)",
       "Bash(cat ./.env)",
       "Bash(rm -rf *)",
-      "Bash(git push --force *)"
+      "Bash(git push --force *)",
+      "WebFetch(domain:api.telegram.org)"
     ]
   },
   "hooks": {
@@ -59,6 +60,17 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-env.mjs"],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-telegram.mjs"],
             "timeout": 10
           }
         ]

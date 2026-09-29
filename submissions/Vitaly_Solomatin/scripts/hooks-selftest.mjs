@@ -9,6 +9,8 @@
 //   4. log-filter.mjs rewrites the tool input so the raw .agent-log/actions.jsonl never reaches the context window:
 //      a Bash dump becomes `node scripts/agent-log-summary.mjs`, a Read becomes a Read of .agent-log/summary.txt,
 //      and everything else is left untouched
+//   5. protect-telegram.mjs blocks any agent call to the Telegram Bot API (api.telegram.org, the app endpoints that reach
+//      Telegram, `app.notify test`, WebFetch) and still allows searching the code for those strings and mocked tests
 // Usage: node scripts/hooks-selftest.mjs
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
@@ -174,6 +176,27 @@ check(
   "log-filter names itself in systemMessage, so the rewrite is visible",
   /hook \(log-filter\)/.test(filter({ tool_name: "Bash", tool_input: { command: "cat .agent-log/actions.jsonl" } }).message),
 );
+
+// 5. protect-telegram: агент не звертається до Bot API — ні напряму, ні через застосунок. Пошук у коді дозволено.
+for (const [tool, input, expect, note] of [
+  ["Bash", { command: 'curl -s "https://api.telegram.org/bot123:ABC/getUpdates"' }, 2, "curl getUpdates"],
+  ["Bash", { command: "python3 -c \"import urllib.request as u; u.urlopen('https://api.telegram.org/bot1/getMe')\"" }, 2, "python one-liner"],
+  ["Bash", { command: "curl -s http://127.0.0.1:8080/api/settings/telegram/candidates" }, 2, "app candidates"],
+  ["Bash", { command: "curl -s -X POST http://127.0.0.1:8000/settings/telegram/recipients/436586281/test" }, 2, "app test message"],
+  ["Bash", { command: "docker compose exec backend python -m app.notify test" }, 2, "CLI notify test"],
+  ["Bash", { command: "grep -rn 'api.telegram.org' backend/app" }, 0, "search the code"],
+  ["Bash", { command: "grep -rn api.telegram.org backend/app | head" }, 0, "search piped into head"],
+  ["Bash", { command: "rg -n settings/telegram/candidates frontend/src" }, 0, "search the code (rg)"],
+  ["Bash", { command: "curl -s http://127.0.0.1:8080/api/settings/telegram/recipients" }, 0, "recipients list (no Telegram call)"],
+  ["Bash", { command: "cd backend && uv run pytest tests/test_telegram_api.py -q" }, 0, "tests use a mocked Bot API"],
+  ["WebFetch", { url: "https://api.telegram.org/bot1/getUpdates", prompt: "x" }, 2, "WebFetch Bot API"],
+  ["WebFetch", { url: "https://core.telegram.org/bots/api", prompt: "x" }, 0, "WebFetch Bot API docs"],
+]) {
+  const r = run("protect-telegram.mjs", { ...base, hook_event_name: "PreToolUse", tool_name: tool, tool_input: input });
+  check(`protect-telegram ${tool} ${note} -> exit ${expect}`, r.status === expect, r.status === 2 ? r.stderr.trim().slice(0, 90) : "");
+}
+const tgBroken = spawnSync(process.execPath, [join(here, ".claude", "hooks", "protect-telegram.mjs")], { input: "not json", env, encoding: "utf8" });
+check("protect-telegram survives malformed input (exit 0)", tgBroken.status === 0);
 
 rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? `\n${failed} check(s) failed` : "\nall hook checks passed");
