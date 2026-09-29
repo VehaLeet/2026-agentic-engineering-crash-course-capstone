@@ -48,7 +48,7 @@ class GateSource(FakeDamSource):
 
 @asynccontextmanager
 async def running(engine, source, now=lambda: datetime(2026, 9, 28, 9, 0, tzinfo=UTC)):
-    app = create_app(engine=engine, source=source, now=now)
+    app = create_app(engine=engine, source=source, now=now, scheduler=False)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -118,10 +118,16 @@ async def test_health_needs_no_auth_and_reveals_nothing(engine):
 
 async def test_no_route_requires_credentials(engine):
     async with running(engine, FakeDamSource()) as (app, client):
-        routes = [r for r in app.routes if isinstance(r, APIRoute)]
-        assert {r.path for r in routes} == {"/health", "/collect", "/runs/{run_id}", "/status", "/prices"}
+        # FastAPI 0.141 обгортає include_router у _IncludedRouter: його маршрути — в original_router.
+        flat = [x for r in app.routes for x in getattr(getattr(r, "original_router", None), "routes", [r])]
+        routes = [r for r in flat if isinstance(r, APIRoute)]
+        assert {r.path for r in routes} == {
+            "/health", "/collect", "/runs/{run_id}", "/status", "/prices", "/settings/schedule",
+            "/settings/notifications", "/settings/telegram/recipients", "/settings/telegram/recipients/{chat_id}",
+            "/settings/telegram/recipients/{chat_id}/test", "/settings/telegram/candidates",
+        }
         for route in routes:
-            path = route.path.replace("{run_id}", "1")
+            path = route.path.replace("{run_id}", "1").replace("{chat_id}", "1")
             params = {"date_from": "2026-07-01", "date_to": "2026-07-01"} if path == "/prices" else None
             for method in route.methods:
                 r = await client.request(method, path, params=params)
@@ -136,15 +142,15 @@ async def test_no_route_requires_credentials(engine):
 async def test_run_manager_tracks_and_drains_tasks():
     done = []
 
-    async def job(run_id):
+    async def job(run_id, trigger):
         await asyncio.sleep(0)
-        done.append(run_id)
+        done.append((run_id, trigger))
 
     manager = RunManager(job)
-    manager.start(1)
+    manager.start(1, "scheduled")
     assert manager.active == 1
     await manager.wait_all()
-    assert manager.active == 0 and done == [1]
+    assert manager.active == 0 and done == [(1, "scheduled")]
 
 
 async def test_collect_returns_202_with_run_reference(engine):
@@ -262,3 +268,17 @@ async def test_status_on_empty_log(engine):
         r = await client.get("/status")
     assert r.status_code == 200
     assert r.json() == {"last_run": None, "last_update": None, "recent_errors": []}
+
+
+async def test_without_telegram_warns_and_collect_still_works(engine, caplog):
+    import logging
+    app = create_app(engine=engine, source=GateSource({Q3: q3_file(2)}), scheduler=False, telegram=None)
+    with caplog.at_level(logging.WARNING):
+        async with app.router.lifespan_context(app):
+            assert app.state.telegram is None
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                run_id = (await client.post("/collect")).json()["run_id"]
+                await app.state.manager.wait_all()
+                assert (await client.get(f"/runs/{run_id}")).json()["status"] == "success"
+    assert "TELEGRAM_BOT_TOKEN не задано" in caplog.text

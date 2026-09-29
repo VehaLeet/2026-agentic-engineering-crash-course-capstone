@@ -4,7 +4,8 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    BigInteger, Boolean, CHAR, CheckConstraint, Date, DateTime, ForeignKey, Identity, Index, LargeBinary, Numeric,
+    BigInteger, Boolean, CHAR, CheckConstraint, Date, DateTime, ForeignKey, Identity, Index, Integer, LargeBinary,
+    Numeric,
     SmallInteger, Text, UniqueConstraint,
     text,
 )
@@ -86,6 +87,32 @@ class TelegramRecipient(Base):
     chat_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # ціле (зокрема від'ємне) або @channel
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+COLLECT_INTERVAL_MIN = 5  # хвилин; частіше — зайве навантаження на ОРЕЕ
+COLLECT_INTERVAL_MAX = 1440  # раз на добу
+COLLECT_INTERVAL_DEFAULT = 60
+
+
+class AppSettings(Base):
+    """Налаштування сервісу: рівно один рядок (id = 1). Зріз 9 додасть сюди свої колонки."""
+
+    __tablename__ = "app_settings"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_app_settings_single_row"),
+        CheckConstraint(
+            f"collect_interval_minutes BETWEEN {COLLECT_INTERVAL_MIN} AND {COLLECT_INTERVAL_MAX}",
+            name="ck_app_settings_collect_interval",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    collect_interval_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text(str(COLLECT_INTERVAL_DEFAULT))
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
 DELIVERY_STATUSES = ("pending", "sent", "failed")

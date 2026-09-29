@@ -258,3 +258,43 @@ async def test_telegram_schema_constraints(sessions):
     with pytest.raises(IE):  # CHECK status
         async with sessions() as s, s.begin():
             s.add(NotificationDelivery(run_id=run_id, chat_id="456", status="bogus", created_at=now))
+
+
+def test_app_settings_default_row_after_migration(alembic_config, database_url):
+    # Окремо від фікстури engine: її TRUNCATE прибирає типовий рядок, а тут перевіряється сама міграція.
+    import asyncio
+    from app.storage.database import make_engine
+
+    command.downgrade(alembic_config, "0003_telegram")
+    command.upgrade(alembic_config, "head")
+
+    async def read():
+        engine = make_engine(database_url)
+        try:
+            async with engine.connect() as conn:
+                return (await conn.execute(text(
+                    "SELECT id, schedule_enabled, collect_interval_minutes FROM app_settings"
+                ))).all()
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(read()) == [(1, True, 60)]
+
+
+async def test_app_settings_schema_constraints(sessions):
+    from sqlalchemy.exc import IntegrityError as IE
+    from app.storage.models import AppSettings
+
+    async with sessions() as s, s.begin():
+        await s.execute(text("DELETE FROM app_settings"))
+        s.add(AppSettings(id=1))
+    with pytest.raises(IE):  # CHECK (id = 1)
+        async with sessions() as s, s.begin():
+            s.add(AppSettings(id=2))
+    for bad in (4, 1441):
+        with pytest.raises(IE):
+            async with sessions() as s, s.begin():
+                await s.execute(text("UPDATE app_settings SET collect_interval_minutes = :v"), {"v": bad})
+    for good in (5, 1440):
+        async with sessions() as s, s.begin():
+            await s.execute(text("UPDATE app_settings SET collect_interval_minutes = :v"), {"v": good})

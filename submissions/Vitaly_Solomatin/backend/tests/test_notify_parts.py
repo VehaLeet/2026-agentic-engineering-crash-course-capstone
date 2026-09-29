@@ -136,3 +136,51 @@ def test_message_edge_cases():
     assert "середньозважена — грн" in text  # null -> «—»
     assert f"…і ще {15 - MAX_DAYS} діб" in text
     assert len(text) <= TELEGRAM_LIMIT
+
+
+async def test_recipient_enable_disable_and_get(sessions):
+    from app.notify.recipients import Recipient, RecipientRepository
+    repo = RecipientRepository(sessions)
+    await repo.add("123456789")
+    assert await repo.set_enabled("123456789", False) == Recipient("123456789", False)
+    assert await repo.enabled() == []
+    assert await repo.get("123456789") == Recipient("123456789", False)
+    assert await repo.set_enabled("123456789", True) == Recipient("123456789", True)
+    assert await repo.enabled() == ["123456789"]
+    assert await repo.set_enabled("555", True) is None
+    assert await repo.get("555") is None
+
+
+# getUpdates
+
+async def test_get_updates_reads_without_confirming_or_changing_bot_settings():
+    import json as _json
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path, _json.loads(request.content)))
+        return httpx.Response(200, json={"ok": True, "result": [{"update_id": 1}]})
+
+    client = TelegramClient("123:SECRET", transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    assert await client.get_updates() == [{"update_id": 1}]
+    [(path, body)] = seen
+    assert path == "/bot123:SECRET/getUpdates"
+    assert "offset" not in body and "allowed_updates" not in body
+
+
+async def test_get_updates_webhook_conflict_is_not_retried():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(409, json={"ok": False, "description": "Conflict: can't use getUpdates method while webhook is active"})
+
+    client = TelegramClient("123:SECRET", transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    with pytest.raises(TelegramError) as e:
+        await client.get_updates()
+    assert len(calls) == 1
+    assert "webhook is active" in str(e.value) and "SECRET" not in str(e.value)
+
+
+async def _no_sleep(_):
+    pass

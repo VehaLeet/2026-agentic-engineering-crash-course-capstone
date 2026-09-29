@@ -1,4 +1,4 @@
-"""Прямий виклик Bot API sendMessage через httpx (бриф: без фреймворку ботів)."""
+"""Прямі виклики Bot API (sendMessage, getUpdates) через httpx (бриф: без фреймворку ботів)."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -35,8 +35,23 @@ class TelegramClient:
 
     async def send(self, chat_id: str, text: str) -> int:
         """Надіслати повідомлення; повертає кількість спроб. Кидає TelegramError."""
-        url = f"{self.base_url}/bot{self._token}/sendMessage"
-        body = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+        _, attempts = await self._call(
+            "sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+        )
+        return attempts
+
+    async def get_updates(self) -> list[dict]:
+        """Оновлення, які Telegram ще зберігає (до 24 год). Без offset: нічого не підтверджується.
+
+        allowed_updates теж не передаємо: Telegram запам'ятовує його для бота, а читання не має
+        змінювати налаштувань. Типовий набір уже містить повідомлення і my_chat_member.
+        """
+        result, _ = await self._call("getUpdates", {"timeout": 0, "limit": 100})
+        return result if isinstance(result, list) else []
+
+    async def _call(self, method: str, body: dict) -> tuple[object, int]:
+        """Виклик Bot API з повторами; повертає (result, кількість спроб). Кидає TelegramError."""
+        url = f"{self.base_url}/bot{self._token}/{method}"
         last = "невідома помилка"
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             for attempt in range(1, self.attempts + 1):
@@ -47,9 +62,9 @@ class TelegramClient:
                     if attempt < self.attempts:
                         await self.sleep(2 ** (attempt - 1))
                     continue
-                if r.status_code == 200:
-                    return attempt
                 payload = _json(r)
+                if r.status_code == 200:
+                    return payload.get("result"), attempt
                 description = payload.get("description") or f"HTTP {r.status_code}"
                 last = f"HTTP {r.status_code}: {description}"
                 if r.status_code == 429 or r.status_code >= 500:
@@ -57,7 +72,7 @@ class TelegramClient:
                         retry_after = (payload.get("parameters") or {}).get("retry_after")
                         await self.sleep(float(retry_after) if retry_after else 2 ** (attempt - 1))
                     continue
-                raise TelegramError(self.redact(last))  # 400/403: повтор не допоможе
+                raise TelegramError(self.redact(last))  # 400/403/409: повтор не допоможе
         raise TelegramError(self.redact(f"{self.attempts} спроби невдалі: {last}"))
 
 

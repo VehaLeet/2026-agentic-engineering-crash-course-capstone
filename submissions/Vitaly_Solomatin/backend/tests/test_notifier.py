@@ -153,3 +153,29 @@ def test_app_and_cli_wire_the_notifier_backfill_does_not():
     assert "notifier=dam_notifier" in inspect.getsource(api_app)
     assert "notifier=notifier_from_env" in inspect.getsource(collect_mod)
     assert "notif" not in inspect.getsource(backfill)
+
+
+# Глобальний вимикач
+
+async def test_switched_off_sends_nothing_and_records_no_deliveries(repository, sessions, engine, two_recipients):
+    from app.settings import NotificationSettingsStore
+    await NotificationSettingsStore(sessions).set_enabled(False)
+    tg = FakeTelegram()
+    outcome = await collect(FakeDamSource({Q3: q3_file(2)}), repository, sessions, engine, make_notifier(sessions, repository, tg))
+    assert outcome.status == "success"
+    assert tg.sent == [] and await deliveries(sessions) == []
+
+
+async def test_reenabling_does_not_resend_missed_runs(repository, sessions, engine, two_recipients):
+    from app.settings import NotificationSettingsStore
+    switch = NotificationSettingsStore(sessions)
+    tg = FakeTelegram()
+    notifier = make_notifier(sessions, repository, tg)
+    await switch.set_enabled(False)
+    missed = await collect(FakeDamSource({Q3: q3_file(2)}), repository, sessions, engine, notifier)
+    await switch.set_enabled(True)
+    await notifier.notify_run(missed.run_id, [])  # нічого не змінилось — дорозсилання немає
+    assert tg.sent == [] and await deliveries(sessions) == []
+    later = await collect(FakeDamSource({Q3: q3_file(3)}), repository, sessions, engine, notifier)
+    assert later.status == "success"
+    assert sorted(c for c, _ in tg.sent) == ["111", "222"]

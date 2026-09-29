@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.notify.message import build_message
 from app.notify.recipients import RecipientRepository
 from app.notify.telegram import TelegramClient, TelegramError
+from app.settings import NotificationSettingsStore
 from app.storage.models import NotificationDelivery
 from app.storage.repository import DamRepository
 
@@ -28,6 +29,7 @@ class Notifier:
         self.sessions = sessions
         self.repository = repository
         self.recipients = RecipientRepository(sessions)
+        self.settings = NotificationSettingsStore(sessions)
         self.client = client  # None — токен не задано, сповіщення вимкнені
 
     async def notify_run(self, run_id: int, changed: Iterable[date], recalculated: Iterable[date] = ()) -> None:
@@ -40,6 +42,8 @@ class Notifier:
     async def _notify(self, run_id: int, changed: list[date], recalculated: list[date]) -> None:
         if self.client is None or not changed:
             return
+        if not await self.settings.enabled():
+            return  # вимкнено глобально: без доставок, і після ввімкнення нічого не дорозсилається
         chat_ids = await self.recipients.enabled()
         if not chat_ids:
             return

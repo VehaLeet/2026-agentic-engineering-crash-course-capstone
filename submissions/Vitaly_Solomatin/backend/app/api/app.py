@@ -1,22 +1,29 @@
-"""HTTP API: ручний запуск збору, стан запусків, ціни, перевірка живості.
+"""HTTP API: ручний запуск збору, стан запусків, ціни, розклад, перевірка живості.
 
 Автентифікації немає свідомо (ранній MVP): межа доступу — loopback, див. app/api/__main__.py.
 """
 
+import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.runs_manager import RunManager
+from app.api.telegram_routes import router as telegram_router
 from app.collection.collect import collect_once
 from app.collection.runs import RunInfo, RunLog
 from app.dam_source.source import DamSource
-from app.notify.notifier import Notifier, notifier_from_env
+from app.notify.notifier import Notifier, telegram_from_env
+from app.notify.telegram import TelegramClient
+from app.scheduling import CollectScheduler, collect_tick
+from app.settings import ScheduleSettingsStore
+from app.storage.models import COLLECT_INTERVAL_MAX, COLLECT_INTERVAL_MIN
 from app.storage.repository import DamRepository
 from app.timeutil import kyiv_today
 
@@ -47,6 +54,22 @@ class SystemStatus(BaseModel):
     recent_errors: list[Run]
 
 
+class Schedule(BaseModel):
+    enabled: bool
+    interval_minutes: int
+    next_run_at: datetime | None
+
+
+class ScheduleUpdate(BaseModel):
+    # strict: "15", 7.5 і true не приймаються як інтервал, "true" і 1 — як ознака.
+    enabled: StrictBool
+    interval_minutes: Annotated[int, Field(strict=True, ge=COLLECT_INTERVAL_MIN, le=COLLECT_INTERVAL_MAX)]
+
+
+UNSET = object()  # маркер «взяти з env» для параметра telegram у create_app
+
+log = logging.getLogger(__name__)
+
 HOURLY_RANGE_LIMIT_DAYS = 366  # рівно рік з високосним: ≤ 9 150 точок, ≈ 0.5 МБ
 
 HOURLY_FIELDS = ("price", "volume_sell", "volume_buy", "declared_volume_sell", "declared_volume_buy")
@@ -64,7 +87,13 @@ def create_app(
     source: DamSource | None = None,
     now: Callable[[], datetime | None] = lambda: None,
     notifier: Notifier | None = None,
+    scheduler: bool = True,
+    telegram: TelegramClient | None | object = UNSET,
 ) -> FastAPI:
+    """`scheduler=False` — лише для тестів: без планувальника стартовий запуск не додає рядків у журнал.
+
+    `telegram`: UNSET — клієнт з env (`TELEGRAM_BOT_TOKEN`), None — явно без токена.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -78,25 +107,39 @@ def create_app(
         repository = DamRepository(sessions)
         dam_source = source or OreeDamSource()
 
-        dam_notifier = notifier or notifier_from_env(sessions, repository)
+        client = telegram_from_env() if telegram is UNSET else telegram
+        if client is None:
+            log.warning("TELEGRAM_BOT_TOKEN не задано — сповіщення вимкнені")
+        dam_notifier = notifier or Notifier(sessions, repository, client)
 
-        async def job(run_id: int):
+        async def job(run_id: int, trigger: str):
             return await collect_once(
-                dam_source, repository, runs, db, kyiv_today(now()), "manual", run_id, notifier=dam_notifier
+                dam_source, repository, runs, db, kyiv_today(now()), trigger, run_id, notifier=dam_notifier
             )
 
         app.state.runs = runs
+        app.state.telegram = client
         app.state.repository = repository
         app.state.manager = RunManager(job)
+        app.state.settings = ScheduleSettingsStore(sessions)
+        app.state.settings_lock = asyncio.Lock()
+        app.state.scheduler = None
+        if scheduler:
+            app.state.scheduler = CollectScheduler(collect_tick(runs, app.state.manager))
+            app.state.scheduler.start(await app.state.settings.get())
         try:
             yield
         finally:
+            if app.state.scheduler is not None:
+                app.state.scheduler.shutdown()  # спершу — щоб під час зупинки не почався новий тік
             await app.state.manager.shutdown()
             if own_engine:
                 await db.dispose()
 
     # /docs, /redoc і /openapi.json вимкнено: інакше вони відкриті без автентифікації.
     app = FastAPI(title="OREE DAM Monitor", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    app.include_router(telegram_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -105,7 +148,7 @@ def create_app(
     @app.post("/collect", status_code=status.HTTP_202_ACCEPTED, response_model=CollectAccepted)
     async def collect(request: Request, response: Response) -> CollectAccepted:
         run_id = await request.app.state.runs.start("manual")
-        request.app.state.manager.start(run_id)
+        request.app.state.manager.start(run_id, "manual")
         response.headers["Location"] = f"/runs/{run_id}"
         return CollectAccepted(run_id=run_id, status_url=f"/runs/{run_id}")
 
@@ -124,6 +167,25 @@ def create_app(
             last_update=state.last_update and Run.of(state.last_update),
             recent_errors=[Run.of(r) for r in state.recent_errors],
         )
+
+    def schedule_of(request: Request, enabled: bool, interval_minutes: int) -> Schedule:
+        scheduler: CollectScheduler | None = request.app.state.scheduler
+        return Schedule(enabled=enabled, interval_minutes=interval_minutes,
+                        next_run_at=scheduler.next_run_at() if scheduler is not None else None)
+
+    @app.get("/settings/schedule", response_model=Schedule)
+    async def get_schedule(request: Request) -> Schedule:
+        settings = await request.app.state.settings.get()
+        return schedule_of(request, settings.enabled, settings.interval_minutes)
+
+    @app.put("/settings/schedule", response_model=Schedule)
+    async def put_schedule(body: ScheduleUpdate, request: Request) -> Schedule:
+        # Лок: порядок застосування до планувальника збігається з порядком комітів у БД.
+        async with request.app.state.settings_lock:
+            saved = await request.app.state.settings.update(body.enabled, body.interval_minutes)
+            if request.app.state.scheduler is not None:
+                request.app.state.scheduler.apply(saved)  # БД уже закомічена: вона джерело правди
+        return schedule_of(request, saved.enabled, saved.interval_minutes)
 
     @app.get("/prices")
     async def get_prices(

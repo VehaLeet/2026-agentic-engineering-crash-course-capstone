@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -58,3 +58,18 @@ class RecipientRepository:
         async with self.sessions() as s, s.begin():
             result = await s.execute(delete(TelegramRecipient).where(TelegramRecipient.chat_id == chat_id.strip()))
             return result.rowcount > 0
+
+    async def get(self, chat_id: str) -> Recipient | None:
+        async with self.sessions() as s:
+            row = (await s.execute(
+                select(TelegramRecipient).where(TelegramRecipient.chat_id == chat_id.strip())
+            )).scalar_one_or_none()
+            return row and Recipient(row.chat_id, row.enabled)
+
+    async def set_enabled(self, chat_id: str, enabled: bool) -> Recipient | None:
+        async with self.sessions() as s, s.begin():
+            row = (await s.execute(
+                update(TelegramRecipient).where(TelegramRecipient.chat_id == chat_id.strip())
+                .values(enabled=enabled).returning(TelegramRecipient.chat_id, TelegramRecipient.enabled)
+            )).first()
+            return row and Recipient(row.chat_id, row.enabled)

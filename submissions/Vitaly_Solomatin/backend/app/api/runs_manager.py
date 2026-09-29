@@ -1,11 +1,11 @@
-"""Фонові запуски збору в межах одного процесу (один воркер uvicorn)."""
+"""Фонові запуски збору (ручні й планові) в межах одного процесу (один воркер uvicorn)."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
 
 
 class RunManager:
-    def __init__(self, job: Callable[[int], Awaitable[object]]):
+    def __init__(self, job: Callable[[int, str], Awaitable[object]]):
         self._job = job
         self._tasks: set[asyncio.Task] = set()
 
@@ -13,8 +13,8 @@ class RunManager:
     def active(self) -> int:
         return len(self._tasks)
 
-    def start(self, run_id: int) -> asyncio.Task:
-        task = asyncio.create_task(self._job(run_id), name=f"collect-run-{run_id}")
+    def start(self, run_id: int, trigger: str) -> asyncio.Task:
+        task = asyncio.create_task(self._job(run_id, trigger), name=f"collect-run-{run_id}")
         self._tasks.add(task)  # сильне посилання: інакше GC може прибрати задачу посеред збору
         task.add_done_callback(self._tasks.discard)
         return task

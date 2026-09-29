@@ -37,3 +37,6 @@ def build_message(daily: Sequence[DailyPrices], recalculated: Iterable[date] = (
     if len(days) > MAX_DAYS:
         lines += ["", f"…і ще {len(days) - MAX_DAYS} діб"]
     return "\n".join(lines)[:TELEGRAM_LIMIT]
+
+
+TEST_TEXT = "OREE DAM Monitor: тестове повідомлення. Сповіщення про нові результати РДН приходитимуть сюди."

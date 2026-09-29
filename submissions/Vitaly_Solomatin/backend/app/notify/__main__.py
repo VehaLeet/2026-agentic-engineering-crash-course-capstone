@@ -4,11 +4,11 @@ import argparse
 import asyncio
 import sys
 
+from app.notify.message import TEST_TEXT
 from app.notify.notifier import telegram_from_env
 from app.notify.recipients import InvalidChatId, RecipientRepository
 from app.notify.telegram import TelegramClient, TelegramError
 
-TEST_TEXT = "OREE DAM Monitor: тестове повідомлення. Сповіщення про нові результати РДН приходитимуть сюди."
 
 
 async def main(argv: list[str] | None = None, client: TelegramClient | None = None, sessions=None) -> int:
