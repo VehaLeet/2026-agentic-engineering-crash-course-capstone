@@ -20,15 +20,15 @@ Postgres, показує графік і таблицю цін і надсила
 
 ```sh
 make up | down | logs | backfill | clean          # увесь стек у Docker (UI http://127.0.0.1:8080)
+make check                                        # усі перевірки: хуки, backend, frontend, lint, build
+make check-hooks | check-backend | check-frontend # те саме частинами
 docker compose up -d postgres                     # лише БД для розробки
-cd backend  && uv run pytest                      # тести на testcontainers-Postgres
 cd backend  && uv run python -m app.api           # API на 127.0.0.1:8000
-cd frontend && npm test && npm run lint && npm run build
 cd frontend && npm run dev                        # UI на :5173, /api проксується на :8000
-node scripts/hooks-selftest.mjs                   # перевірка хуків .claude/
 ```
 
-Перш ніж казати «готово», запусти тести тієї частини, яку змінював.
+Під час роботи запускай перевірку тієї частини, яку змінюєш (`make check-backend` тощо).
+Перш ніж казати «готово», запусти `make check`: «готово» означає, що він зелений.
 
 ## Як вносити зміни
 

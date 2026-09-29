@@ -108,7 +108,9 @@ make backfill
 База для розробки — той самий сервіс Postgres: `docker compose up -d postgres`. Далі:
 - API: `cd backend && uv run python -m app.api`;
 - UI: `cd frontend && npm run dev`;
-- тести: `uv run pytest` і `npm test`.
+- перевірка всього: `make check` (самоперевірка хуків, тести backend і frontend, lint, build).
+  Потрібні запущений Docker, `uv` і `npm ci` у `frontend/`. Частинами: `make check-hooks`,
+  `make check-backend`, `make check-frontend`.
 
 Контейнерний стек і dev-запуск використовують **одну й ту саму базу** (том `postgres_data`), тож
 `make clean` видалить і дані, з якими ви працювали локально.
