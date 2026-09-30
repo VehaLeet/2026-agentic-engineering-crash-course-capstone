@@ -82,7 +82,17 @@ async def test_one_recipient_failure_does_not_stop_others(repository, sessions, 
     assert outcome.status == "success"
     [(c1, s1, a1, e1), (c2, s2, _, _)] = await deliveries(sessions)
     assert (c1, s1) == ("111", "failed") and "blocked by the user" in e1
+    assert a1 == 1  # 403 не повторюється: у журналі фактичні спроби, а не максимум
     assert (c2, s2) == ("222", "sent")
+
+
+async def test_5xx_is_recorded_as_one_failed_attempt(repository, sessions, engine, two_recipients):
+    tg = FakeTelegram(fail={"111": 502})
+    outcome = await collect(FakeDamSource({Q3: q3_file(2)}), repository, sessions, engine, make_notifier(sessions, repository, tg))
+    assert outcome.status == "success"
+    [(c1, s1, a1, e1), (c2, s2, a2, _)] = await deliveries(sessions)
+    assert (c1, s1, a1) == ("111", "failed", 1) and "HTTP 502" in e1
+    assert (c2, s2, a2) == ("222", "sent", 1)
 
 
 async def test_recalculated_day_is_marked(repository, sessions, engine, two_recipients):

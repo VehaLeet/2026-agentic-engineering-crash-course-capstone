@@ -79,9 +79,30 @@ async def test_send_request_shape():
     assert json.loads(req.content) == {"chat_id": "123", "text": "привіт", "disable_web_page_preview": True}
 
 
-async def test_retries_502_then_ok():
+async def test_send_does_not_retry_502():
     steps, sleeps = Steps((502, {}), (200, {"ok": True})), []
+    with pytest.raises(TelegramError, match="HTTP 502") as e:
+        await client(steps, sleeps).send("123", "x")
+    assert len(steps.requests) == 1 and e.value.attempts == 1
+
+
+@pytest.mark.parametrize("error", [httpx.ReadTimeout("timeout"), httpx.RemoteProtocolError("disconnected")])
+async def test_send_does_not_retry_when_request_may_have_arrived(error):
+    steps, sleeps = Steps(error, (200, {"ok": True})), []
+    with pytest.raises(TelegramError) as e:
+        await client(steps, sleeps).send("123", "x")
+    assert len(steps.requests) == 1 and e.value.attempts == 1
+
+
+async def test_send_retries_connect_error_then_ok():
+    steps, sleeps = Steps(httpx.ConnectError("boom"), (200, {"ok": True})), []
     assert await client(steps, sleeps).send("123", "x") == 2
+
+
+async def test_get_updates_retries_502_then_ok():
+    steps, sleeps = Steps((502, {}), (200, {"ok": True, "result": []})), []
+    assert await client(steps, sleeps).get_updates() == []
+    assert len(steps.requests) == 2
 
 
 async def test_429_waits_retry_after():
@@ -92,16 +113,16 @@ async def test_429_waits_retry_after():
 
 async def test_403_is_not_retried_and_keeps_description():
     steps, sleeps = Steps((403, {"ok": False, "description": "Forbidden: bot was blocked by the user"})), []
-    with pytest.raises(TelegramError, match="blocked by the user"):
+    with pytest.raises(TelegramError, match="blocked by the user") as e:
         await client(steps, sleeps).send("123", "x")
-    assert len(steps.requests) == 1
+    assert len(steps.requests) == 1 and e.value.attempts == 1
 
 
 async def test_persistent_network_failure_three_attempts():
     steps, sleeps = Steps(httpx.ConnectError("boom")), []
-    with pytest.raises(TelegramError):
+    with pytest.raises(TelegramError) as e:
         await client(steps, sleeps).send("123", "x")
-    assert len(steps.requests) == 3
+    assert len(steps.requests) == 3 and e.value.attempts == 3
 
 
 async def test_token_never_leaks_into_errors():
@@ -129,13 +150,31 @@ async def test_message_on_real_oree_numbers(repository, fixture_bytes):
 
 
 def test_message_edge_cases():
-    days = [day(date(2026, 9, d), "1", "2", None if d == 5 else "1.5") for d in range(15, 0, -1)]
-    text = build_message(days)
+    days = [day(date(2026, 9, d), "1", "2", None if d == 10 else "1.5") for d in range(15, 0, -1)]
+    text = build_message(days, recalculated=[date(2026, 9, d) for d in range(1, 16)])
     lines = text.splitlines()
-    assert lines[2].startswith("01.09.2026")  # за зростанням дати
+    assert lines[2].startswith("06.09.2026")  # найпізніші 10 діб, за зростанням дати
+    assert "05.09.2026" not in text
     assert "середньозважена — грн" in text  # null -> «—»
     assert f"…і ще {15 - MAX_DAYS} діб" in text
     assert len(text) <= TELEGRAM_LIMIT
+
+
+def test_truncation_keeps_new_day():
+    recalc = [date(2026, 9, d) for d in range(1, 13)]
+    days = [day(d, "1", "2", "1.5") for d in recalc] + [day(date(2026, 9, 29), "1", "2", "1.5")]
+    text = build_message(days, recalculated=recalc)
+    shown = [line.split()[0] for line in text.splitlines() if line[:2].isdigit()]
+    assert shown == [f"{d:02d}.09.2026" for d in range(4, 13)] + ["29.09.2026"]
+    assert "03.09.2026" not in text and "…і ще 3 діб" in text
+
+
+def test_truncation_many_new_days_keeps_latest():
+    days = [day(date(2026, 9, d), "1", "2", "1.5") for d in range(1, 13)]
+    text = build_message(days)
+    shown = [line.split()[0] for line in text.splitlines() if line[:2].isdigit()]
+    assert shown == [f"{d:02d}.09.2026" for d in range(3, 13)]
+    assert "…і ще 2 діб" in text
 
 
 async def test_recipient_enable_disable_and_get(sessions):
