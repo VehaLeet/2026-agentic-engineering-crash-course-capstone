@@ -24,9 +24,12 @@ def _date(d: date) -> str:
 
 def build_message(daily: Sequence[DailyPrices], recalculated: Iterable[date] = ()) -> str:
     recalc = set(recalculated)
-    days = sorted(daily, key=lambda x: x.delivery_date)
+    # Понад MAX_DAYS: спершу нові доби, потім найпізніші перераховані; показуємо за зростанням дати.
+    shown = sorted(daily, key=lambda x: (x.delivery_date in recalc, -x.delivery_date.toordinal()))[:MAX_DAYS]
+    days = sorted(shown, key=lambda x: x.delivery_date)
+    hidden = len(daily) - len(days)
     lines = ["РДН: оновлено результати"]
-    for d in days[:MAX_DAYS]:
+    for d in days:
         mark = " (перераховано)" if d.delivery_date in recalc else ""
         lines += [
             "",
@@ -34,8 +37,8 @@ def build_message(daily: Sequence[DailyPrices], recalculated: Iterable[date] = (
             f"  мін {_num(d.price_min)} · макс {_num(d.price_max)} · "
             f"середньозважена {_num(d.price_weighted)} грн/МВт·год",
         ]
-    if len(days) > MAX_DAYS:
-        lines += ["", f"…і ще {len(days) - MAX_DAYS} діб"]
+    if hidden:
+        lines += ["", f"…і ще {hidden} діб"]
     return "\n".join(lines)[:TELEGRAM_LIMIT]
 
 

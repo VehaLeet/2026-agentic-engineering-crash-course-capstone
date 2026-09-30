@@ -8,8 +8,17 @@ import httpx
 API_BASE = "https://api.telegram.org"
 
 
+# Запит точно не дійшов до Telegram: з'єднання не встановлено. Решта транспортних помилок
+# (таймаут відповіді, обрив) лишає невідомим, чи повідомлення вже надіслано.
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
 class TelegramError(Exception):
-    """Доставку не вдалося виконати. Текст уже очищено від токена."""
+    """Доставку не вдалося виконати. Текст уже очищено від токена; attempts — виконані спроби."""
+
+    def __init__(self, message: str, attempts: int):
+        super().__init__(message)
+        self.attempts = attempts
 
 
 class TelegramClient:
@@ -36,7 +45,7 @@ class TelegramClient:
     async def send(self, chat_id: str, text: str) -> int:
         """Надіслати повідомлення; повертає кількість спроб. Кидає TelegramError."""
         _, attempts = await self._call(
-            "sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+            "sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}, idempotent=False
         )
         return attempts
 
@@ -46,11 +55,16 @@ class TelegramClient:
         allowed_updates теж не передаємо: Telegram запам'ятовує його для бота, а читання не має
         змінювати налаштувань. Типовий набір уже містить повідомлення і my_chat_member.
         """
-        result, _ = await self._call("getUpdates", {"timeout": 0, "limit": 100})
+        result, _ = await self._call("getUpdates", {"timeout": 0, "limit": 100}, idempotent=True)
         return result if isinstance(result, list) else []
 
-    async def _call(self, method: str, body: dict) -> tuple[object, int]:
-        """Виклик Bot API з повторами; повертає (result, кількість спроб). Кидає TelegramError."""
+    async def _call(self, method: str, body: dict, idempotent: bool) -> tuple[object, int]:
+        """Виклик Bot API з повторами; повертає (result, кількість спроб). Кидає TelegramError.
+
+        Неідемпотентний виклик (sendMessage) повторюється лише тоді, коли запит точно не дійшов:
+        з'єднання не встановлено або 429. Після таймауту відповіді, обриву чи 5xx повідомлення
+        могло вже дійти, а дубль у Telegram гірший за пропуск.
+        """
         url = f"{self.base_url}/bot{self._token}/{method}"
         last = "невідома помилка"
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
@@ -59,6 +73,8 @@ class TelegramClient:
                     r = await client.post(url, json=body)
                 except httpx.TransportError as e:  # мережа, таймаут
                     last = f"{type(e).__name__}: {e}"
+                    if not idempotent and not isinstance(e, _NOT_SENT):
+                        raise TelegramError(self.redact(last), attempt) from None
                     if attempt < self.attempts:
                         await self.sleep(2 ** (attempt - 1))
                     continue
@@ -67,13 +83,13 @@ class TelegramClient:
                     return payload.get("result"), attempt
                 description = payload.get("description") or f"HTTP {r.status_code}"
                 last = f"HTTP {r.status_code}: {description}"
-                if r.status_code == 429 or r.status_code >= 500:
+                if r.status_code == 429 or (idempotent and r.status_code >= 500):
                     if attempt < self.attempts:
                         retry_after = (payload.get("parameters") or {}).get("retry_after")
                         await self.sleep(float(retry_after) if retry_after else 2 ** (attempt - 1))
                     continue
-                raise TelegramError(self.redact(last))  # 400/403/409: повтор не допоможе
-        raise TelegramError(self.redact(f"{self.attempts} спроби невдалі: {last}"))
+                raise TelegramError(self.redact(last), attempt)  # 400/403/409, 5xx для sendMessage
+        raise TelegramError(self.redact(f"{self.attempts} спроби невдалі: {last}"), self.attempts)
 
 
 def _json(response: httpx.Response) -> dict:

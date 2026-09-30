@@ -56,7 +56,7 @@ class Notifier:
                 attempts = await self.client.send(chat_id, text)
                 await self._finish(run_id, chat_id, "sent", attempts, None)
             except TelegramError as e:  # збій одного отримувача не зриває решту
-                await self._finish(run_id, chat_id, "failed", self.client.attempts, str(e))
+                await self._finish(run_id, chat_id, "failed", e.attempts, str(e))
 
     async def _claim(self, run_id: int, chat_id: str) -> bool:
         """Записати pending ДО відправки. False, якщо доставка для пари вже існує."""
